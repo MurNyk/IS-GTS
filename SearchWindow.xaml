@@ -1,0 +1,186 @@
+﻿using Microsoft.Win32;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.Remoting.Contexts;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace IS_GTS.Windows
+{
+    public partial class GostDocumentsWindow : Window
+    {
+        private List<GostDocument> _allDocuments;
+        private List<GostDocument> _filteredDocuments;
+
+        public class GostDocument
+        {
+            public string FileName { get; set; }
+            public string Description { get; set; }
+            public string FileSize { get; set; }
+            public string FullPath { get; set; }
+
+            public string DisplayName
+            {
+                get
+                {
+                    string gostNumber = FileName.Replace("gost_", "").Replace(".doc", "");
+                    return $"ГОСТ {gostNumber}. {Description}";
+                }
+            }
+        }
+
+        public GostDocumentsWindow()
+        {
+            InitializeComponent();
+            LoadDocuments();
+            SearchTextBox.TextChanged += SearchTextBox_TextChanged;
+        }
+
+        private void LoadDocuments()
+        {
+            _allDocuments = new List<GostDocument>();
+            string docsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "GostDocs");
+
+            if (!Directory.Exists(docsPath))
+            {
+                return;
+            }
+
+            // Загружаем описания из JSON
+            var descriptions = new Dictionary<string, string>();
+            string jsonPath = Path.Combine(docsPath, "descriptions.json");
+            if (File.Exists(jsonPath))
+            {
+                try
+                {
+                    string jsonContent = File.ReadAllText(jsonPath);
+                    dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonContent);
+                    foreach (var doc in data.documents)
+                    {
+                        descriptions[doc.fileName.ToString()] = doc.description.ToString();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка загрузки описаний: {ex.Message}", "Ошибка");
+                }
+            }
+
+            // Сканируем файлы .doc
+            var files = Directory.GetFiles(docsPath, "*.doc");
+            foreach (var file in files)
+            {
+                string fileName = Path.GetFileName(file);
+                _allDocuments.Add(new GostDocument
+                {
+                    FileName = fileName,
+                    Description = descriptions.ContainsKey(fileName) ? descriptions[fileName] : "Нет описания",
+                    FileSize = GetFileSize(file),
+                    FullPath = file
+                });
+            }
+
+            _filteredDocuments = new List<GostDocument>(_allDocuments);
+            DocumentsList.ItemsSource = _filteredDocuments;
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            string searchText = SearchTextBox.Text?.Trim().ToLower();
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                _filteredDocuments = new List<GostDocument>(_allDocuments);
+            }
+            else
+            {
+                _filteredDocuments = _allDocuments.Where(doc =>
+                    doc.FileName.ToLower().Contains(searchText) ||
+                    doc.Description.ToLower().Contains(searchText)
+                ).ToList();
+            }
+
+            DocumentsList.ItemsSource = _filteredDocuments;
+        }
+
+        private void ClearSearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            SearchTextBox.Text = "";
+            _filteredDocuments = new List<GostDocument>(_allDocuments);
+            DocumentsList.ItemsSource = _filteredDocuments;
+        }
+
+        private string GetFileSize(string filePath)
+        {
+            var info = new FileInfo(filePath);
+            if (info.Exists)
+            {
+                double size = info.Length / 1024.0 / 1024.0;
+                return $"{size:F1} MB";
+            }
+            return "0 MB";
+        }
+
+        private void OpenFile_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            string filePath = button?.Tag?.ToString();
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                MessageBox.Show("Файл не найден", "Ошибка");
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = filePath,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось открыть файл: {ex.Message}", "Ошибка");
+            }
+        }
+
+        private void DownloadFile_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            string sourcePath = button?.Tag?.ToString();
+            if (string.IsNullOrEmpty(sourcePath) || !File.Exists(sourcePath))
+            {
+                MessageBox.Show("Файл не найден", "Ошибка");
+                return;
+            }
+
+            string fileName = Path.GetFileName(sourcePath);
+            var saveDialog = new SaveFileDialog
+            {
+                Filter = "Word документы|*.doc",
+                FileName = fileName
+            };
+
+            if (saveDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    File.Copy(sourcePath, saveDialog.FileName, true);
+                    MessageBox.Show("Файл сохранён", "Успех");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка");
+                }
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+    }
+}

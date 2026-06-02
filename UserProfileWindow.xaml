@@ -1,0 +1,191 @@
+﻿using System;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+
+namespace IS_GTS.Windows
+{
+    public partial class UserDetailsWindow : Window
+    {
+        private int _userId;
+        private int _currentAdminId;
+
+        public UserDetailsWindow(int userId, int currentAdminId)
+        {
+            InitializeComponent();
+            _userId = userId;
+            _currentAdminId = currentAdminId;
+            LoadUserData();
+        }
+
+        private void LoadUserData()
+        {
+            using (var db = new Data.DiplomMurEntities())
+            {
+                var user = db.User
+                    .Include(u => u.Role)
+                    .Include(u => u.VisitHistory)
+                    .FirstOrDefault(u => u.UserID == _userId);
+
+                if (user != null)
+                {
+                    LastNameTextBox.Text = user.UserLastName;
+                    FirstNameTextBox.Text = user.UserFirstName;
+                    PatronymicTextBox.Text = user.UserPatronymic ?? "";
+                    BirthDatePicker.SelectedDate = user.UserDateBirth;
+                    PhoneTextBox.Text = user.UserPhone ?? "";
+                    EmailTextBox.Text = user.UserEmail ?? "";
+                    LoginTextBox.Text = user.UserLogin;
+
+                    var roles = db.Role.ToList();
+                    RoleComboBox.ItemsSource = roles;
+                    RoleComboBox.SelectedValue = user.UserRoleID;
+
+                    bool isBlocked = user.UserIsBlocked == true;
+                    ActiveRadioButton.IsChecked = !isBlocked;
+                    BlockedRadioButton.IsChecked = isBlocked;
+
+                    // Обновляем кнопку в зависимости от статуса
+                    UpdateBlockButtonState(isBlocked);
+
+                    var firstVisit = user.VisitHistory.OrderBy(v => v.VisitCreate).FirstOrDefault();
+                    RegistrationDateText.Text = firstVisit?.VisitCreate?.ToString("dd.MM.yyyy") ?? "Неизвестно";
+
+                    var lastVisit = user.VisitHistory.OrderByDescending(v => v.VisitCreate).FirstOrDefault();
+                    LastVisitText.Text = lastVisit?.VisitCreate?.ToString("dd.MM.yyyy HH:mm") ?? "Никогда";
+
+                    FavoritesCountText.Text = db.Favorite.Count(f => f.FavoriteUserID == _userId).ToString();
+                    VisitsCountText.Text = user.VisitHistory.Count.ToString();
+                }
+            }
+        }
+
+        private void UpdateBlockButtonState(bool isBlocked)
+        {
+            if (isBlocked)
+            {
+                BlockButton.Content = "Разблокировать";
+                BlockButton.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(76, 175, 80)); 
+            }
+            else
+            {
+                BlockButton.Content = "Заблокировать";
+                BlockButton.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(255, 186, 175)); 
+            }
+        }
+
+        private void BlockButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_userId == _currentAdminId)
+            {
+                MessageBox.Show("Вы не можете заблокировать себя!", "Ошибка");
+                return;
+            }
+
+            bool isCurrentlyBlocked = BlockedRadioButton.IsChecked == true;
+            string action = isCurrentlyBlocked ? "разблокировать" : "заблокировать";
+
+            var result = MessageBox.Show($"{action.ToUpper()} пользователя {LastNameTextBox.Text} {FirstNameTextBox.Text}?",
+                "Подтверждение", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                bool newStatus = !isCurrentlyBlocked;
+
+                using (var db = new Data.DiplomMurEntities())
+                {
+                    var user = db.User.Find(_userId);
+                    if (user != null)
+                    {
+                        user.UserIsBlocked = newStatus;
+                        db.SaveChanges();
+
+                        BlockedRadioButton.IsChecked = newStatus;
+                        ActiveRadioButton.IsChecked = !newStatus;
+                        UpdateBlockButtonState(newStatus);
+
+                        string message = newStatus ? "Пользователь заблокирован!" : "Пользователь разблокирован!";
+                        MessageBox.Show(message, "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                }
+            }
+        }
+
+        private void SaveButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(LastNameTextBox.Text) ||
+                string.IsNullOrWhiteSpace(FirstNameTextBox.Text) ||
+                string.IsNullOrWhiteSpace(LoginTextBox.Text))
+            {
+                MessageBox.Show("Заполните все обязательные поля!", "Ошибка");
+                return;
+            }
+
+            using (var db = new Data.DiplomMurEntities())
+            {
+                var user = db.User.Find(_userId);
+                if (user != null)
+                {
+                    var existingUser = db.User.FirstOrDefault(u => u.UserLogin == LoginTextBox.Text && u.UserID != _userId);
+                    if (existingUser != null)
+                    {
+                        MessageBox.Show("Этот логин уже занят!", "Ошибка");
+                        return;
+                    }
+
+                    user.UserLastName = LastNameTextBox.Text.Trim();
+                    user.UserFirstName = FirstNameTextBox.Text.Trim();
+                    user.UserPatronymic = string.IsNullOrWhiteSpace(PatronymicTextBox.Text) ? null : PatronymicTextBox.Text.Trim();
+                    user.UserDateBirth = BirthDatePicker.SelectedDate;
+                    user.UserPhone = string.IsNullOrWhiteSpace(PhoneTextBox.Text) ? null : PhoneTextBox.Text.Trim();
+                    user.UserEmail = string.IsNullOrWhiteSpace(EmailTextBox.Text) ? null : EmailTextBox.Text.Trim();
+                    user.UserLogin = LoginTextBox.Text.Trim();
+
+                    if (RoleComboBox.SelectedValue != null)
+                    {
+                        user.UserRoleID = (int)RoleComboBox.SelectedValue;
+                    }
+
+                    user.UserIsBlocked = BlockedRadioButton.IsChecked == true;
+                    db.SaveChanges();
+
+                    MessageBox.Show("Данные успешно сохранены!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    this.Close();
+                }
+            }
+        }
+
+        private void ResetPasswordButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_userId == _currentAdminId)
+            {
+                MessageBox.Show("Вы не можете сбросить свой пароль!", "Ошибка");
+                return;
+            }
+
+            var result = MessageBox.Show($"Сбросить пароль пользователю {LastNameTextBox.Text} {FirstNameTextBox.Text}?\n\nНовый пароль: 123456",
+                "Подтверждение", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                using (var db = new Data.DiplomMurEntities())
+                {
+                    var user = db.User.Find(_userId);
+                    if (user != null)
+                    {
+                        user.UserPassword = "123456";
+                        db.SaveChanges();
+                        MessageBox.Show($"Пароль сброшен!\nНовый пароль: 123456", "Успех");
+                    }
+                }
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+    }
+}

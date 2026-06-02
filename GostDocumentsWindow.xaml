@@ -1,0 +1,1789 @@
+﻿// GostDetailsWindow.xaml.cs
+using IS_GTS.Converters;
+using IS_GTS.ViewModels;
+using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+
+namespace IS_GTS.Windows
+{
+    public partial class GostDetailsWindow : Window
+    {
+        private readonly string _gostNumber;
+        private readonly int _currentUserId;
+        private List<ProductCharacteristic> _productsData;
+        private List<ProductCharacteristic> _originalData;
+        private List<FilterSetting> _currentFilters = new List<FilterSetting>();
+        private int? _selectedSizeId;
+        private bool _isDrawingVisible = true;
+
+        // Для рисования профиля
+        private Canvas _profileCanvas;
+        private double _profileHeight = 0;
+        private double _profileWidth = 0;
+        private double _webThickness = 0;
+        private double _flangeThickness = 0;
+        private string _profileType = "";
+        private int _currentSizeId = 0;
+        private List<Line> _dimensionLines = new List<Line>(); // ← ДОБАВИТЬ ЭТУ СТРОКУ
+
+
+        // Класс для хранения информации о размере
+        public class DimensionInfo
+        {
+            public string Name { get; set; }      // b, h, s, t
+            public double Value { get; set; }     // значение в мм
+            public Rect Bounds { get; set; }      // область на Canvas
+            public Action HighlightAction { get; set; } // действие для подсветки
+            public Action UnhighlightAction { get; set; } // снятие подсветки
+        }
+
+        public GostDetailsWindow(string gostNumber, int userId = 0, int? selectedSizeId = null)
+        {
+            InitializeComponent();
+            _gostNumber = gostNumber;
+            _currentUserId = userId;
+            _selectedSizeId = selectedSizeId;
+
+            GostDataGrid.RowHeight = 60;
+            GostDataGrid.FrozenColumnCount = 2;
+
+            LoadGostDetails();
+            _currentFilters = _currentFilters ?? new List<FilterSetting>();
+
+            LoadGostDrawing();
+            GostDataGrid.MouseDoubleClick += GostDataGrid_MouseDoubleClick;
+
+            GostDataGrid.SelectionChanged += GostDataGrid_SelectionChanged;
+            CreateProfileCanvas();
+        }
+
+        private void LoadFavoritesState()
+        {
+            if (_productsData == null || !_productsData.Any() || _currentUserId <= 0) return;
+
+            try
+            {
+                using (var context = new Data.DiplomMurEntities())
+                {
+                    var sizeIds = _productsData.Select(p => p.SizeID).ToList();
+
+                    var favorites = context.Favorite
+                        .Where(f => f.FavoriteUserID == _currentUserId
+                        && sizeIds.Contains(f.FavoriteProductSizeID))
+                        .Select(f => new
+                        {
+                            f.FavoriteProductSizeID,
+                            f.FavoriteFolderName
+                        })
+                        .ToList();
+
+                    var favoritesDict = favorites
+                        .ToDictionary(f => f.FavoriteProductSizeID, f => f.FavoriteFolderName);
+
+                    foreach (var product in _productsData)
+                    {
+                        if (favoritesDict.ContainsKey(product.SizeID))
+                        {
+                            product.IsFavorite = true;
+                            product.FolderName = favoritesDict[product.SizeID];
+                        }
+                        else
+                        {
+                            product.IsFavorite = false;
+                            product.FolderName = null;
+                        }
+
+                        product.IsSelectedProfile = (_selectedSizeId.HasValue && product.SizeID == _selectedSizeId.Value);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки избранного: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool AddToFavorite(int sizeId, string profileName)
+        {
+            if (_currentUserId <= 0)
+            {
+                MessageBox.Show("Войдите в систему для добавления в избранное", "Ошибка");
+                return false;
+            }
+            try
+            {
+                using (var context = new Data.DiplomMurEntities())
+                {
+                    var existing = context.Favorite
+                        .FirstOrDefault(f => f.FavoriteUserID == _currentUserId
+                                          && f.FavoriteProductSizeID == sizeId);
+
+                    if (existing != null) return false;
+
+                    var favorite = new Data.Favorite
+                    {
+                        FavoriteUserID = _currentUserId,
+                        FavoriteProductSizeID = sizeId,
+                        FavoriteCreate = DateTime.Now,
+                        FavoriteFolderName = null
+                    };
+
+                    context.Favorite.Add(favorite);
+                    context.SaveChanges();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка");
+                return false;
+            }
+        }
+
+        private bool RemoveFromFavorite(int sizeId)
+        {
+            try
+            {
+                using (var context = new Data.DiplomMurEntities())
+                {
+                    var favorite = context.Favorite
+                        .FirstOrDefault(f => f.FavoriteUserID == _currentUserId
+                        && f.FavoriteProductSizeID == sizeId);
+                    if (favorite == null) return false;
+
+                    context.Favorite.Remove(favorite);
+                    context.SaveChanges();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка");
+                return false;
+            }
+        }
+
+        private void GostDataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var row = ItemsControl.ContainerFromElement(GostDataGrid,
+                        e.OriginalSource as DependencyObject) as DataGridRow;
+            if (row == null) return;
+            if (e.OriginalSource is DataGridColumnHeader) return;
+            var product = row.DataContext as ProductCharacteristic;
+            if (product == null) return;
+            HandleFavoriteAction(product);
+            e.Handled = true;
+        }
+
+        private void HandleFavoriteAction(ProductCharacteristic product)
+        {
+            if (product.IsFavorite)
+            {
+                var result = MessageBox.Show($"Удалить '{product.ProductName}' из избранного?", "Удаление", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    if (RemoveFromFavorite(product.SizeID))
+                    {
+                        product.IsFavorite = false;
+                        GostDataGrid.Items.Refresh();
+                    }
+                }
+            }
+            else
+            {
+                var result = MessageBox.Show($"Добавить '{product.ProductName}' в избранное?", "Добавление", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result == MessageBoxResult.Yes)
+                {
+                    if (AddToFavorite(product.SizeID, product.ProductName))
+                    {
+                        product.IsFavorite = true;
+                        GostDataGrid.Items.Refresh();
+                    }
+                }
+            }
+        }
+
+        private void LoadGostDrawing()
+        {
+            try
+            {
+                string projectPath = Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)?.Parent?.Parent?.FullName ?? AppDomain.CurrentDomain.BaseDirectory;
+                string resourcesPath = System.IO.Path.Combine(projectPath, "Resources");
+                if (!Directory.Exists(resourcesPath))
+                {
+                    Directory.CreateDirectory(resourcesPath);
+                    return;
+                }
+                string fileName = _gostNumber.Replace("ГОСТ", "").Replace(" ", "").Trim();
+                string filePath = System.IO.Path.Combine(resourcesPath, fileName + ".jpg");
+                if (File.Exists(filePath))
+                {
+                    LoadImage(filePath);
+                    return;
+                }
+                filePath = System.IO.Path.Combine(resourcesPath, fileName + ".png");
+                if (File.Exists(filePath))
+                {
+                    LoadImage(filePath);
+                    return;
+                }
+                string noPhotoPath = System.IO.Path.Combine(resourcesPath, "No_gost_photo.jpg");
+                if (File.Exists(noPhotoPath))
+                {
+                    LoadImage(noPhotoPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Ошибка: {ex.Message}");
+            }
+        }
+
+        private void LoadImage(string path)
+        {
+            var bitmap = new BitmapImage(new Uri(path, UriKind.Absolute));
+            GostDrawingImage.Source = bitmap;
+        }
+
+        private void LoadGostDetails()
+        {
+            try
+            {
+                LoadDataFromDatabase();
+
+                if (_productsData == null || !_productsData.Any())
+                {
+                    MessageBox.Show("Для данного ГОСТа нет типоразмеров", "Информация", MessageBoxButton.OK, MessageBoxImage.Error);
+                    this.Close();
+                    return;
+                }
+
+                SetupDynamicColumns();
+                LoadDataIntoTable();
+                UpdateCountInfo();
+
+                if (_selectedSizeId.HasValue)
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        var selectedItem = _productsData.FirstOrDefault(p => p.SizeID == _selectedSizeId.Value);
+                        if (selectedItem != null)
+                        {
+                            GostDataGrid.SelectedItem = selectedItem;
+                            GostDataGrid.ScrollIntoView(selectedItem);
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Loaded);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки данных ГОСТа: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                this.Close();
+            }
+        }
+
+        private void SetupDynamicColumns()
+        {
+            GostDataGrid.Columns.Clear();
+
+            if (_productsData == null || !_productsData.Any())
+                return;
+
+            _productsData = _productsData.OrderBy(p => p.ProductID).ToList();
+
+            Style standardCellStyle = new Style(typeof(DataGridCell));
+            standardCellStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
+            standardCellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            standardCellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(4)));
+            standardCellStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Center));
+            standardCellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.LightGray));
+            standardCellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
+
+            Style profileCellStyle = new Style(typeof(DataGridCell));
+            profileCellStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
+            profileCellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            profileCellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(4)));
+            profileCellStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Left));
+            profileCellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.LightGray));
+            profileCellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
+
+            var favoriteColumn = new DataGridTemplateColumn
+            {
+                Header = "★",
+                Width = 40,
+                IsReadOnly = true,
+                CanUserSort = true,
+                CanUserResize = false
+            };
+
+            DataTemplate cellTemplate = new DataTemplate();
+            FrameworkElementFactory borderFactory = new FrameworkElementFactory(typeof(Border));
+            borderFactory.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+            borderFactory.SetValue(Border.PaddingProperty, new Thickness(8));
+
+            FrameworkElementFactory imageFactory = new FrameworkElementFactory(typeof(Image));
+            imageFactory.SetValue(Image.WidthProperty, 24.0);
+            imageFactory.SetValue(Image.HeightProperty, 24.0);
+            imageFactory.SetValue(Image.StretchProperty, Stretch.Uniform);
+
+            Binding sourceBinding = new Binding("IsFavorite")
+            {
+                Converter = new FavoriteImageConverter()
+            };
+            imageFactory.SetBinding(Image.SourceProperty, sourceBinding);
+
+            borderFactory.AppendChild(imageFactory);
+            cellTemplate.VisualTree = borderFactory;
+            favoriteColumn.CellTemplate = cellTemplate;
+            favoriteColumn.CellStyle = standardCellStyle;
+            GostDataGrid.Columns.Add(favoriteColumn);
+
+            var profileColumn = new DataGridTextColumn
+            {
+                Header = "Профиль",
+                Binding = new Binding("ProductName"),
+                Width = 120,
+                IsReadOnly = true,
+                CanUserSort = true
+            };
+            profileColumn.CellStyle = profileCellStyle;
+            GostDataGrid.Columns.Add(profileColumn);
+
+            var uniqueCharacteristics = new HashSet<string>();
+            foreach (var product in _productsData)
+            {
+                foreach (var charName in product.Characteristics.Keys)
+                {
+                    uniqueCharacteristics.Add(charName);
+                }
+            }
+
+            var context = Data.DiplomMurEntities.GetContext();
+            var charInfoFromDb = context.Characteristic
+                .Where(c => uniqueCharacteristics.Contains(c.CharactName))
+                .ToDictionary(c => c.CharactName, c => c.CharactDefaultUnit ?? "");
+
+            foreach (var charName in uniqueCharacteristics.OrderBy(c => c))
+            {
+                string unit = charInfoFromDb.ContainsKey(charName) ? charInfoFromDb[charName] : "";
+                string header = string.IsNullOrEmpty(unit) ? charName : $"{charName} ({unit})";
+
+                var charColumn = new DataGridTextColumn
+                {
+                    Header = header,
+                    Binding = new Binding($"Characteristics[{charName}].DisplayValue"),
+                    Width = CalculateAutoWidth(header),
+                    IsReadOnly = true,
+                    CanUserSort = true
+                };
+                charColumn.CellStyle = standardCellStyle;
+                GostDataGrid.Columns.Add(charColumn);
+            }
+        }
+
+        private double CalculateAutoWidth(string headerText)
+        {
+            int textLength = headerText.Length;
+            if (textLength < 6) return 80;
+            if (textLength < 10) return 90;
+            if (textLength < 14) return 110;
+            if (textLength < 18) return 130;
+            if (textLength < 22) return 150;
+            return 170;
+        }
+
+        private void LoadDataIntoTable()
+        {
+            _productsData = _productsData.OrderBy(p => p.ProductID).ToList();
+            GostDataGrid.ItemsSource = _productsData;
+        }
+
+        private void UpdateCountInfo()
+        {
+            if (_productsData != null)
+            {
+                ColumnsCountText.Text = (GostDataGrid.Columns.Count - 1).ToString();
+                int filteredRows = _productsData.Count;
+                int totalRows = _originalData?.Count ?? filteredRows;
+
+                if (filteredRows == totalRows)
+                    RowsCountText.Text = $"{totalRows}";
+                else
+                    RowsCountText.Text = $"{filteredRows} из {totalRows}";
+            }
+        }
+
+        private void LoadDataFromDatabase()
+        {
+            var context = Data.DiplomMurEntities.GetContext();
+
+            var product = context.Product
+                .Include(p => p.Category)
+                .Include(p => p.Category.Material)
+                .OrderBy(p => p.ProductID)
+                .FirstOrDefault(p => p.ProductStandartNumber == _gostNumber);
+
+            if (product != null)
+            {
+                Title = $"ГОСТ {_gostNumber} - {product.Category?.CategoryName}";
+                GostNumber.Text = $"ГОСТ: {_gostNumber}";
+                GostTitleText.Text = $"{product.Category?.CategoryName} ({product.Category?.Material?.MaterialName})";
+                ProductsCountText.Text = $"Стандарт: {product.ProductStandartName}";
+            }
+
+            var sizes = context.Size
+                .Include(s => s.Product)
+                .Where(s => s.Product.ProductStandartNumber == _gostNumber)
+                .ToList();
+
+            if (!sizes.Any())
+            {
+                _productsData = new List<ProductCharacteristic>();
+                return;
+            }
+
+            var sizeIds = sizes.Select(s => s.SizeID).ToList();
+            var allCharacteristics = context.CharacteristicValue
+                .Include(cv => cv.Characteristic)
+                .Where(cv => sizeIds.Contains(cv.ValueSizeID))
+                .ToList();
+
+            var characteristicsBySize = allCharacteristics
+                .GroupBy(cv => cv.ValueSizeID)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            _productsData = new List<ProductCharacteristic>();
+
+            foreach (var size in sizes)
+            {
+                var productChar = new ProductCharacteristic
+                {
+                    ProductID = size.Product?.ProductID ?? 0,
+                    SizeID = size.SizeID,
+                    ProductName = size.SizeName,
+                    NominalValue = size.SizeNominalValue,
+                    IsFavorite = false
+                };
+
+                if (characteristicsBySize.ContainsKey(size.SizeID))
+                {
+                    var groupedByCharName = characteristicsBySize[size.SizeID]
+                        .Where(cv => cv.Characteristic != null)
+                        .GroupBy(cv => cv.Characteristic.CharactName)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+
+                    foreach (var group in groupedByCharName)
+                    {
+                        string charName = group.Key;
+                        var values = group.Value;
+
+                        if (productChar.Characteristics.ContainsKey(charName))
+                            continue;
+
+                        if (values.Count > 1)
+                        {
+                            if (charName.Equals("масса", StringComparison.OrdinalIgnoreCase) ||
+                                charName.Equals("вес", StringComparison.OrdinalIgnoreCase) ||
+                                charName.Equals("масса 1м", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var massValue = values.FirstOrDefault(v => v.ValueNumeric.HasValue) ?? values.First();
+                                string unit = massValue.ValueUnit ?? massValue.Characteristic?.CharactDefaultUnit ?? "";
+                                string displayValue = FormatCharacteristicValue(massValue, unit);
+
+                                if (!string.IsNullOrEmpty(displayValue))
+                                {
+                                    decimal valueToStore = massValue.ValueNumeric.HasValue
+                                        ? massValue.ValueNumeric.Value
+                                        : (massValue.ValueTolerance.HasValue ? massValue.ValueTolerance.Value : 0);
+
+                                    productChar.Characteristics[charName] = new CharacteristicDetail
+                                    {
+                                        Value = valueToStore,
+                                        Unit = unit,
+                                        DisplayValue = displayValue
+                                    };
+                                }
+                                continue;
+                            }
+
+                            var sortedValues = values.OrderBy(v => v.ValueToleranceDirection).ToList();
+                            string combinedDisplayValue = string.Join(Environment.NewLine, sortedValues
+                                .Select(cv =>
+                                {
+                                    string unit = cv.ValueUnit ?? cv.Characteristic?.CharactDefaultUnit ?? "";
+                                    return FormatCharacteristicValue(cv, unit);
+                                })
+                                .Where(v => !string.IsNullOrEmpty(v)));
+
+                            if (!string.IsNullOrEmpty(combinedDisplayValue))
+                            {
+                                string unit = values.First().ValueUnit ?? values.First().Characteristic?.CharactDefaultUnit ?? "";
+                                var mainValue = values.FirstOrDefault(v => v.ValueTolerance == null && v.ValueNumeric.HasValue)
+                                    ?? values.FirstOrDefault(v => v.ValueNumeric.HasValue);
+                                decimal valueToStore = mainValue != null && mainValue.ValueNumeric.HasValue
+                                    ? mainValue.ValueNumeric.Value : 0;
+
+                                productChar.Characteristics[charName] = new CharacteristicDetail
+                                {
+                                    Value = valueToStore,
+                                    Unit = unit,
+                                    DisplayValue = combinedDisplayValue
+                                };
+                            }
+                        }
+                        else
+                        {
+                            var cv = values.First();
+                            if (cv.Characteristic != null)
+                            {
+                                string unit = cv.ValueUnit ?? cv.Characteristic.CharactDefaultUnit ?? "";
+                                string displayValue = FormatCharacteristicValue(cv, unit);
+
+                                if (!string.IsNullOrEmpty(displayValue))
+                                {
+                                    decimal valueToStore = cv.ValueNumeric.HasValue
+                                        ? cv.ValueNumeric.Value
+                                        : (cv.ValueTolerance.HasValue ? cv.ValueTolerance.Value : 0);
+
+                                    productChar.Characteristics[charName] = new CharacteristicDetail
+                                    {
+                                        Value = valueToStore,
+                                        Unit = unit,
+                                        DisplayValue = displayValue
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+                _productsData.Add(productChar);
+            }
+            LoadFavoritesState();
+        }
+
+        private string FormatCharacteristicValue(Data.CharacteristicValue cv, string unit)
+        {
+            if (cv.ValueTolerance.HasValue && !string.IsNullOrEmpty(cv.ValueToleranceDirection))
+            {
+                string toleranceSign = cv.ValueToleranceDirection;
+                string formattedValue;
+                if (cv.ValueNumeric.HasValue)
+                    formattedValue = $"{toleranceSign}{cv.ValueTolerance.Value:F2}";
+                else
+                    formattedValue = $"{toleranceSign}{cv.ValueTolerance.Value:F2}";
+
+                return string.IsNullOrEmpty(unit) ? formattedValue : $"{formattedValue} {unit}";
+            }
+            if (cv.ValueNumeric.HasValue)
+            {
+                return string.IsNullOrEmpty(unit) ? $"{cv.ValueNumeric.Value:F2}" : $"{cv.ValueNumeric.Value:F2} {unit}";
+            }
+            if (!string.IsNullOrEmpty(cv.ValueString))
+            {
+                return string.IsNullOrEmpty(unit) ? cv.ValueString : $"{cv.ValueString} {unit}";
+            }
+            return string.Empty;
+        }
+
+        private static T FindVisualChild<T>(DependencyObject obj) where T : DependencyObject
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(obj); i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(obj, i);
+                if (child != null)
+                {
+                    if (child is T)
+                        return (T)child;
+                    T childOfChild = FindVisualChild<T>(child);
+                    if (childOfChild != null)
+                        return childOfChild;
+                }
+            }
+            return null;
+        }
+
+        private void Close_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        private void CopyToClipboard_Click(object sender, RoutedEventArgs e) { }
+        private void ExportToExcel_Click(object sender, RoutedEventArgs e) { }
+
+        private List<string> GetAllCharacteristics()
+        {
+            var sourceData = _originalData ?? _productsData;
+            if (sourceData == null || !sourceData.Any())
+                return new List<string>();
+
+            var characteristics = new HashSet<string>();
+            foreach (var product in sourceData)
+            {
+                foreach (var charName in product.Characteristics.Keys)
+                    characteristics.Add(charName);
+            }
+            return characteristics.OrderBy(c => c).ToList();
+        }
+
+        private void SettingButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var allCharacteristics = GetAllCharacteristics();
+                var currentColumnSettings = GetColumnSettings();
+
+                var filtersWindow = new FiltersWindow
+                {
+                    Owner = this,
+                    Title = $"Фильтры и настройки отображения - ГОСТ {_gostNumber}",
+                    AvailableCharacteristics = allCharacteristics,
+                    CurrentFilters = _currentFilters,
+                    CurrentColumns = currentColumnSettings
+                };
+
+                if (filtersWindow.ShowDialog() == true)
+                {
+                    _currentFilters = filtersWindow.CurrentFilters ?? new List<FilterSetting>();
+                    if (filtersWindow.CurrentColumns != null && filtersWindow.CurrentColumns.Any())
+                        ApplyColumnSettings(filtersWindow.CurrentColumns);
+                    ApplyFilters();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при открытии настроек: {ex.Message}", "Ошибка");
+            }
+        }
+
+        private List<ColumnSetting> GetColumnSettings()
+        {
+            var columnSettings = new List<ColumnSetting>();
+            columnSettings.Add(new ColumnSetting
+            {
+                FieldName = "ProductName",
+                DisplayName = "Профиль",
+                IsVisible = true,
+                Width = 120
+            });
+
+            var allCharacteristics = GetAllCharacteristics();
+            foreach (var charName in allCharacteristics)
+            {
+                DataGridColumn existingColumn = null;
+                foreach (DataGridColumn col in GostDataGrid.Columns)
+                {
+                    if (col.Header?.ToString()?.Contains(charName) == true)
+                    {
+                        existingColumn = col;
+                        break;
+                    }
+                }
+
+                string displayName = GetColumnHeader(charName);
+                bool isVisible = existingColumn == null || existingColumn.Visibility == Visibility.Visible;
+                double width;
+                if (existingColumn != null && existingColumn.Width.IsAbsolute)
+                    width = existingColumn.Width.Value;
+                else
+                    width = CalculateAutoWidth(displayName);
+
+                columnSettings.Add(new ColumnSetting
+                {
+                    FieldName = charName,
+                    DisplayName = displayName,
+                    IsVisible = isVisible,
+                    Width = width
+                });
+            }
+            return columnSettings;
+        }
+
+        private List<string> GetCurrentCharacteristics()
+        {
+            if (_productsData == null || !_productsData.Any())
+                return new List<string>();
+
+            var characteristics = new HashSet<string>();
+            foreach (var product in _productsData)
+            {
+                foreach (var charName in product.Characteristics.Keys)
+                    characteristics.Add(charName);
+            }
+            return characteristics.OrderBy(c => c).ToList();
+        }
+
+        private string GetColumnHeader(string charName)
+        {
+            var context = Data.DiplomMurEntities.GetContext();
+            var characteristic = context.Characteristic.FirstOrDefault(c => c.CharactName == charName);
+            if (characteristic != null && !string.IsNullOrEmpty(characteristic.CharactDefaultUnit))
+                return $"{charName} ({characteristic.CharactDefaultUnit})";
+            return charName;
+        }
+
+        private void ApplyColumnSettings(List<ColumnSetting> columnSettings)
+        {
+            if (columnSettings == null || GostDataGrid.Columns.Count <= 1) return;
+            if (GostDataGrid.Columns.Count > 0)
+            {
+                var profileWidth = columnSettings.FirstOrDefault(c => c.FieldName == "ProductName")?.Width ?? 120;
+                GostDataGrid.Columns[0].Width = new DataGridLength(profileWidth);
+            }
+            for (int i = 1; i < GostDataGrid.Columns.Count; i++)
+            {
+                var column = GostDataGrid.Columns[i];
+                var columnHeader = column.Header?.ToString();
+                if (columnHeader != null)
+                {
+                    foreach (var setting in columnSettings)
+                    {
+                        if (columnHeader.Contains(setting.FieldName) || setting.DisplayName.Contains(columnHeader))
+                        {
+                            column.Visibility = setting.IsVisible ? Visibility.Visible : Visibility.Collapsed;
+                            column.Width = new DataGridLength(setting.Width);
+                            break;
+                        }
+                    }
+                }
+            }
+            UpdateCountInfo();
+        }
+
+        private void ApplyFilters()
+        {
+            try
+            {
+                List<ProductCharacteristic> sourceData;
+                if (_originalData != null && _originalData.Any())
+                    sourceData = _originalData;
+                else if (_productsData != null && _productsData.Any())
+                {
+                    sourceData = _productsData;
+                    if (_originalData == null)
+                        _originalData = new List<ProductCharacteristic>(_productsData);
+                }
+                else
+                {
+                    MessageBox.Show("Нет данных для фильтрации", "Информация");
+                    return;
+                }
+
+                var filteredData = sourceData.ToList();
+                var searchText = SearchTextBox.Text.Trim();
+                if (!string.IsNullOrEmpty(searchText))
+                {
+                    string searchLower = searchText.ToLower();
+                    filteredData = filteredData.Where(p => p != null && p.ProductName != null && p.ProductName.ToLower().Contains(searchLower)).ToList();
+                }
+
+                if (_currentFilters != null && _currentFilters.Any())
+                {
+                    foreach (var filter in _currentFilters)
+                    {
+                        if (filter == null || string.IsNullOrEmpty(filter.ParameterName)) continue;
+                        var newFilteredData = new List<ProductCharacteristic>();
+                        foreach (var product in filteredData)
+                        {
+                            if (product == null || product.Characteristics == null) continue;
+                            if (product.Characteristics.ContainsKey(filter.ParameterName))
+                            {
+                                var charDetail = product.Characteristics[filter.ParameterName];
+                                if (charDetail == null) continue;
+                                decimal value = charDetail.Value;
+                                if (value >= (decimal)filter.MinValue && value <= (decimal)filter.MaxValue)
+                                    newFilteredData.Add(product);
+                            }
+                            else
+                            {
+                                var matchingKey = product.Characteristics.Keys.FirstOrDefault(k => k.Contains(filter.ParameterName) || filter.ParameterName.Contains(k));
+                                if (matchingKey != null)
+                                {
+                                    var charDetail = product.Characteristics[matchingKey];
+                                    decimal value = charDetail.Value;
+                                    if (value >= (decimal)filter.MinValue && value <= (decimal)filter.MaxValue)
+                                        newFilteredData.Add(product);
+                                }
+                            }
+                        }
+                        filteredData = newFilteredData;
+                    }
+                }
+
+                _productsData = filteredData.OrderBy(p => p.ProductID).ToList();
+                GostDataGrid.ItemsSource = _productsData;
+                UpdateCountInfo();
+
+                if (!_productsData.Any() && (sourceData.Count > 0 || !string.IsNullOrEmpty(searchText) || (_currentFilters != null && _currentFilters.Any())))
+                    MessageBox.Show("Нет данных, соответствующих заданным фильтрам", "Информация");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при применении фильтров: {ex.Message}", "Ошибка");
+            }
+        }
+
+        private void UpdateStatusText() { }
+
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        private void SearchTextBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) ApplyFilters();
+        }
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            ApplyFilters();
+        }
+
+        private void ToggleDrawingButton_Click(object sender, RoutedEventArgs e)
+        {
+            _isDrawingVisible = !_isDrawingVisible;
+            if (_isDrawingVisible)
+            {
+                DrawingPanel.Visibility = Visibility.Visible;
+                DrawingColumn.Width = new GridLength(350);
+                ToggleDrawingButton.Content = "◀ Скрыть чертеж";
+                DrawingStatusText.Text = "показан";
+            }
+            else
+            {
+                DrawingPanel.Visibility = Visibility.Collapsed;
+                DrawingColumn.Width = new GridLength(0);
+                ToggleDrawingButton.Content = "▶ Показать чертеж";
+                DrawingStatusText.Text = "скрыт";
+            }
+        }
+
+        private double _currentScale = 1.0;
+        private const double ZOOM_STEP = 0.2;
+        private const double MIN_SCALE = 0.1;
+        private const double MAX_SCALE = 5.0;
+
+        private double _profileZoom = 1.0;
+
+        private void ZoomIn_Click(object sender, RoutedEventArgs e)
+        {
+            _profileZoom += 0.1;
+            if (_profileZoom > 2.0) _profileZoom = 2.0;
+            ApplyProfileZoom();
+        }
+
+        private void ZoomOut_Click(object sender, RoutedEventArgs e)
+        {
+            _profileZoom -= 0.1;
+            if (_profileZoom < 0.5) _profileZoom = 0.5;
+            ApplyProfileZoom();
+        }
+
+        private void ZoomReset_Click(object sender, RoutedEventArgs e)
+        {
+            _profileZoom = 1.0;
+            ApplyProfileZoom();
+        }
+
+        private void ApplyProfileZoom()
+        {
+            var scaleTransform = new ScaleTransform(_profileZoom, _profileZoom);
+            _profileCanvas.LayoutTransform = scaleTransform;
+        }
+        private void ZoomIn()
+        {
+            if (_currentScale >= MAX_SCALE) return;
+            _currentScale += ZOOM_STEP;
+            ApplyZoom();
+        }
+
+        private void ZoomOut()
+        {
+            if (_currentScale <= MIN_SCALE) return;
+            _currentScale -= ZOOM_STEP;
+            ApplyZoom();
+        }
+
+        private void ZoomReset()
+        {
+            _currentScale = 1.0;
+            ApplyZoom();
+        }
+
+        private void ApplyZoom()
+        {
+            if (GostDrawingImage == null) return;
+            var scaleTransform = new ScaleTransform(_currentScale, _currentScale);
+            GostDrawingImage.LayoutTransform = scaleTransform;
+        }
+
+        // ==================== РИСОВАНИЕ ПРОФИЛЯ ====================
+
+        private void CreateProfileCanvas()
+        {
+            _profileCanvas = new Canvas
+            {
+                Width = 320,
+                Height = 250,
+                Background = Brushes.White,
+                Margin = new Thickness(5),
+                Visibility = Visibility.Visible
+            };
+
+            if (DrawingPanel is Grid grid)
+            {
+                grid.Children.Add(_profileCanvas);
+                Grid.SetRow(_profileCanvas, 0);
+            }
+        }
+
+        private void GostDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (GostDataGrid.SelectedItem is ProductCharacteristic selected)
+            {
+                LoadProfileParameters(selected.SizeID);
+                DrawCurrentProfile();
+            }
+        }
+
+        private void LoadProfileParameters(int sizeId)
+        {
+            using (var db = new Data.DiplomMurEntities())
+            {
+                var values = db.CharacteristicValue
+                    .Include(cv => cv.Characteristic)
+                    .Where(cv => cv.ValueSizeID == sizeId)
+                    .ToList();
+
+                var size = db.Size
+                    .Include(s => s.Product)
+                    .Include(s => s.Product.Category)
+                    .FirstOrDefault(s => s.SizeID == sizeId);
+
+                if (size?.Product?.Category != null)
+                {
+                    string categoryName = size.Product.Category.CategoryName;
+
+                    if (categoryName.Contains("Круглый"))
+                        _profileType = "Круглый";
+                    else if (categoryName.Contains("Квадратный"))
+                        _profileType = "Квадратный";
+                    else if (categoryName.Contains("Полосовой"))
+                        _profileType = "Полосовой";
+                    else if (categoryName.Contains("Двутавр"))
+                        _profileType = "Двутавр";
+                    else if (categoryName.Contains("Швеллер"))
+                        _profileType = "Швеллер";
+                    else if (categoryName.Contains("Уголок"))
+                        _profileType = "Уголок";
+                    else
+                        _profileType = categoryName;
+                }
+
+                // Сбрасываем значения
+                _profileHeight = 0;
+                _profileWidth = 0;
+                _webThickness = 0;
+                _flangeThickness = 0;
+
+                // 🟢 КРУГЛЫЙ ПРОКАТ
+                if (_profileType == "Круглый")
+                {
+                    var diameter = values.FirstOrDefault(v => v.ValueCharactID == 10);
+                    if (diameter != null)
+                        _profileHeight = _profileWidth = (double)diameter.ValueNumeric;
+                }
+                // 🟢 КВАДРАТНЫЙ ПРОКАТ
+                else if (_profileType == "Квадратный")
+                {
+                    var side = values.FirstOrDefault(v => v.ValueCharactID == 15);
+                    if (side != null)
+                        _profileHeight = _profileWidth = (double)side.ValueNumeric;
+                }
+                // 🟢 ПОЛОСОВОЙ ПРОКАТ
+                else if (_profileType == "Полосовой")
+                {
+                    var width = values.FirstOrDefault(v => v.ValueCharactID == 1);
+                    var thickness = values.FirstOrDefault(v => v.ValueCharactID == 2);
+                    if (width != null) _profileWidth = (double)width.ValueNumeric;
+                    if (thickness != null) _profileHeight = (double)thickness.ValueNumeric;
+                }
+                // 🟢 ДВУТАВР
+                else if (_profileType == "Двутавр")
+                {
+                    var height = values.FirstOrDefault(v => v.ValueCharactID == 16);
+                    var flangeWidth = values.FirstOrDefault(v => v.ValueCharactID == 1);
+                    var webThick = values.FirstOrDefault(v => v.ValueCharactID == 17);
+                    var flangeThick = values.FirstOrDefault(v => v.ValueCharactID == 18);
+                    if (height != null) _profileHeight = (double)height.ValueNumeric;
+                    if (flangeWidth != null) _profileWidth = (double)flangeWidth.ValueNumeric;
+                    if (webThick != null) _webThickness = (double)webThick.ValueNumeric;
+                    if (flangeThick != null) _flangeThickness = (double)flangeThick.ValueNumeric;
+                }
+
+                // Если значения не найдены, устанавливаем значения по умолчанию
+                if (_profileHeight <= 0) _profileHeight = 60;
+                if (_profileWidth <= 0) _profileWidth = 60;
+                if (_webThickness <= 0) _webThickness = 5;
+                if (_flangeThickness <= 0) _flangeThickness = 5;
+            }
+        }
+        private void DrawIBeamWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double scale = Math.Min(canvasW / (_profileWidth + 30), canvasH / (_profileHeight + 30));
+            if (scale <= 0) scale = 1;
+
+            double centerX = canvasW / 2;
+            double centerY = canvasH / 2;
+
+            double h = _profileHeight * scale;
+            double b = _profileWidth * scale;
+            double s = _webThickness * scale;
+            double t = _flangeThickness * scale;
+            if (s < 2) s = 4;
+            if (t < 2) t = 4;
+
+            // Стенка
+            var web = new Rectangle
+            {
+                Width = s,
+                Height = h - 2 * t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(web, centerX - s / 2);
+            Canvas.SetTop(web, centerY - h / 2 + t);
+            _profileCanvas.Children.Add(web);
+
+            // Верхняя полка
+            var topFlange = new Rectangle
+            {
+                Width = b,
+                Height = t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(topFlange, centerX - b / 2);
+            Canvas.SetTop(topFlange, centerY - h / 2);
+            _profileCanvas.Children.Add(topFlange);
+
+            // Нижняя полка
+            var bottomFlange = new Rectangle
+            {
+                Width = b,
+                Height = t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(bottomFlange, centerX - b / 2);
+            Canvas.SetTop(bottomFlange, centerY + h / 2 - t);
+            _profileCanvas.Children.Add(bottomFlange);
+
+            // Одна выносная линия для высоты h
+            AddSingleDimensionLine(centerX, centerY - h / 2, centerX, centerY + h / 2, "h", _profileHeight);
+        }
+
+        private void DrawCurrentProfile()
+        {
+            if (_profileCanvas == null) return;
+            _profileCanvas.Children.Clear();
+            _dimensionLines.Clear();
+
+            if (_profileType == "Круглый")
+                DrawCircleWithMainDimension();
+            else if (_profileType == "Двутавр")
+                DrawIBeamWithMainDimension();
+            else if (_profileType == "Швеллер")
+                DrawChannelWithMainDimension();
+            else if (_profileType == "Уголок")
+                DrawAngleWithMainDimension();
+            else if (_profileType == "Полосовой")
+                DrawStripWithMainDimension();
+            else if (_profileType == "Квадратный")
+                DrawSquareWithMainDimension();
+            else
+                DrawRectangle();
+
+            AddDimensions(); // дополнительная таблица внизу (опционально)
+        }
+        private void DrawSquareWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            double side = _profileHeight;
+            double size = Math.Min(canvasW - 40, side);
+            if (size <= 0) size = 60;
+
+            double left = (canvasW - size) / 2;
+            double top = (canvasH - size) / 2;
+
+            var rect = new Rectangle
+            {
+                Width = size,
+                Height = size,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+            Canvas.SetLeft(rect, left);
+            Canvas.SetTop(rect, top);
+            _profileCanvas.Children.Add(rect);
+
+            // Одна выносная линия для стороны a
+            AddSingleDimensionLine(left - 15, top + size / 2, left + size + 15, top + size / 2, "a", _profileHeight);
+        }
+
+        private void DrawAngleWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            double width = Math.Min(canvasW - 60, _profileWidth);
+            double height = Math.Min(canvasH - 60, _profileHeight);
+            if (width <= 0) width = 60;
+            if (height <= 0) height = 60;
+
+            double thickness = Math.Min(width / 5, height / 5);
+
+            var geometry = new StreamGeometry();
+            using (var ctx = geometry.Open())
+            {
+                ctx.BeginFigure(new Point(canvasW / 2 - width / 2, canvasH / 2 - height / 2), true, true);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2, canvasH / 2 - height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2, canvasH / 2 + height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2 - thickness, canvasH / 2 + height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2 - thickness, canvasH / 2 - height / 2 + thickness), true, false);
+                ctx.LineTo(new Point(canvasW / 2 - width / 2, canvasH / 2 - height / 2 + thickness), true, false);
+            }
+
+            var angle = new System.Windows.Shapes.Path
+            {
+                Data = geometry,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            _profileCanvas.Children.Add(angle);
+
+            // Одна выносная линия для ширины полки b
+            AddSingleDimensionLine(canvasW / 2 - width / 2 - 15, canvasH / 2, canvasW / 2 + width / 2 + 15, canvasH / 2, "b", _profileWidth);
+        }
+
+        private void AddSingleDimensionLine(double x1, double y1, double x2, double y2, string paramName, double value)
+        {
+            // Рисуем линию
+            var line = new Line
+            {
+                X1 = x1,
+                Y1 = y1,
+                X2 = x2,
+                Y2 = y2,
+                Stroke = Brushes.Blue,
+                StrokeThickness = 1.2,
+                StrokeDashArray = new DoubleCollection { 4, 2 }
+            };
+            _profileCanvas.Children.Add(line);
+            _dimensionLines.Add(line);
+
+            // Добавляем стрелки на концах
+            AddArrow(x1, y1, x2, y2);
+            AddArrow(x2, y2, x1, y1);
+
+            string text = $"{paramName} = {value:F1} мм";
+
+            // Позиция подписи (посередине линии)
+            double midX = (x1 + x2) / 2;
+            double midY = (y1 + y2) / 2;
+
+            var textBlock = new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Background = new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)),
+                Padding = new Thickness(4, 2, 4, 2),
+                Foreground = Brushes.DarkBlue,
+                Cursor = Cursors.Hand
+            };
+
+            Canvas.SetLeft(textBlock, midX - 35);
+            Canvas.SetTop(textBlock, midY - 12);
+            _profileCanvas.Children.Add(textBlock);
+
+            // Подсветка линии при наведении на текст
+            textBlock.MouseEnter += (s, e) => HighlightLine(line, true);
+            textBlock.MouseLeave += (s, e) => HighlightLine(line, false);
+            textBlock.ToolTip = $"{paramName} = {value:F1} мм";
+        }
+        private void DrawSquare()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            // Сторона квадрата (a)
+            double side = _profileHeight;
+            double size = Math.Min(canvasW - 40, side);
+            if (size <= 0) size = 60;
+
+            var rect = new Rectangle
+            {
+                Width = size,
+                Height = size,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+
+            Canvas.SetLeft(rect, (canvasW - size) / 2);
+            Canvas.SetTop(rect, (canvasH - size) / 2);
+            _profileCanvas.Children.Add(rect);
+        }
+
+        private void DrawStrip()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            // Ширина полосы (b) — большая сторона, Толщина (a) — малая сторона
+            double width = Math.Min(canvasW - 60, _profileWidth * 2);   // ширина полосы (b)
+            double height = Math.Min(canvasH - 60, _profileHeight * 5); // толщина (a)
+
+            if (width <= 0) width = 120;
+            if (height <= 0) height = 20;
+
+            // Убеждаемся, что полоса выглядит как полоса (ширина > высоты)
+            if (width < height)
+            {
+                // Меняем местами, если перепутано
+                double temp = width;
+                width = height;
+                height = temp;
+            }
+
+            var rect = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+
+            Canvas.SetLeft(rect, (canvasW - width) / 2);
+            Canvas.SetTop(rect, (canvasH - height) / 2);
+            _profileCanvas.Children.Add(rect);
+        }
+        private void HighlightLine(Line line, bool highlight)
+        {
+            if (highlight)
+            {
+                line.Stroke = Brushes.Red;
+                line.StrokeThickness = 2;
+            }
+            else
+            {
+                line.Stroke = Brushes.Blue;
+                line.StrokeThickness = 1.2;
+            }
+        }
+        private void DrawIBeam()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double scale = Math.Min(canvasW / (_profileWidth + 30), canvasH / (_profileHeight + 30));
+            if (scale <= 0) scale = 1;
+
+            double centerX = canvasW / 2;
+            double centerY = canvasH / 2;
+
+            double h = _profileHeight * scale;
+            double b = _profileWidth * scale;
+            double s = _webThickness * scale;
+            double t = _flangeThickness * scale;
+            if (s < 2) s = 4;
+            if (t < 2) t = 4;
+
+            // Создаём элементы для подсветки
+            var topFlange = new Rectangle
+            {
+                Width = b,
+                Height = t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1,
+                Tag = "flange"
+            };
+            Canvas.SetLeft(topFlange, centerX - b / 2);
+            Canvas.SetTop(topFlange, centerY - h / 2);
+            _profileCanvas.Children.Add(topFlange);
+
+            var bottomFlange = new Rectangle
+            {
+                Width = b,
+                Height = t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1,
+                Tag = "flange"
+            };
+            Canvas.SetLeft(bottomFlange, centerX - b / 2);
+            Canvas.SetTop(bottomFlange, centerY + h / 2 - t);
+            _profileCanvas.Children.Add(bottomFlange);
+
+            var web = new Rectangle
+            {
+                Width = s,
+                Height = h - 2 * t,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1,
+                Tag = "web"
+            };
+            Canvas.SetLeft(web, centerX - s / 2);
+            Canvas.SetTop(web, centerY - h / 2 + t);
+            _profileCanvas.Children.Add(web);
+
+            // Добавляем выносные линии и подписи
+            AddDimensionLine(centerX - b / 2 - 30, centerY - h / 2, centerX + b / 2 + 30, centerY - h / 2, "b", _profileWidth);
+            AddDimensionLine(centerX - b / 2 - 30, centerY + h / 2, centerX + b / 2 + 30, centerY + h / 2, "b", _profileWidth);
+            AddDimensionLine(centerX, centerY - h / 2, centerX, centerY + h / 2, "h", _profileHeight);
+            AddDimensionLine(centerX - s / 2 - 20, centerY - h / 2 + t, centerX - s / 2 - 20, centerY + h / 2 - t, "s", _webThickness);
+            AddDimensionLine(centerX + s / 2 + 20, centerY - h / 2 + t, centerX + s / 2 + 20, centerY + h / 2 - t, "s", _webThickness);
+        }
+
+        private void AddDimensionLine(double x1, double y1, double x2, double y2, string paramName, double value, double offset = 0)
+        {
+            // Если линия слишком короткая, рисуем подпись сбоку
+            double lineLength = Math.Sqrt(Math.Pow(x2 - x1, 2) + Math.Pow(y2 - y1, 2));
+
+            // Минимальная длина для размещения подписи внутри
+            double minLengthForInside = 50;
+
+            string text = $"{paramName} = {value:F1} мм";
+            double textWidth = text.Length * 5; // примерная ширина текста
+
+            // Рисуем линию
+            var line = new Line
+            {
+                X1 = x1,
+                Y1 = y1,
+                X2 = x2,
+                Y2 = y2,
+                Stroke = Brushes.Blue,
+                StrokeThickness = 0.8,
+                StrokeDashArray = new DoubleCollection { 4, 2 }
+            };
+            _profileCanvas.Children.Add(line);
+
+            // Стрелки
+            AddArrow(x1, y1, x2, y2);
+            AddArrow(x2, y2, x1, y1);
+
+            // Позиция подписи
+            double midX = (x1 + x2) / 2;
+            double midY = (y1 + y2) / 2;
+            double textX = midX - textWidth / 2;
+            double textY = midY - 10;
+
+            // Если линия слишком короткая, выносим подпись наружу
+            if (lineLength < minLengthForInside)
+            {
+                double angle = Math.Atan2(y2 - y1, x2 - x1);
+                textX = midX + Math.Cos(angle) * 30;
+                textY = midY + Math.Sin(angle) * 30;
+            }
+
+            var textBlock = new TextBlock
+            {
+                Text = text,
+                FontSize = 9,
+                Background = Brushes.White,
+                Padding = new Thickness(2),
+                Foreground = Brushes.Black,
+                Tag = paramName
+            };
+
+            Canvas.SetLeft(textBlock, textX);
+            Canvas.SetTop(textBlock, textY);
+            _profileCanvas.Children.Add(textBlock);
+
+            // Подсветка
+            textBlock.MouseEnter += (s, e) => HighlightParameter(paramName);
+            textBlock.MouseLeave += (s, e) => UnhighlightParameter(paramName);
+            textBlock.Cursor = Cursors.Hand;
+            textBlock.ToolTip = $"Параметр: {paramName}\nЗначение: {value:F1} мм";
+        }
+
+        private void AddArrow(double x1, double y1, double x2, double y2)
+        {
+            double angle = Math.Atan2(y2 - y1, x2 - x1);
+            double arrowSize = 5;
+
+            // Проверяем, чтобы стрелка не выходила за пределы Canvas
+            double xTip = Math.Max(5, Math.Min(_profileCanvas.Width - 5, x2));
+            double yTip = Math.Max(5, Math.Min(_profileCanvas.Height - 5, y2));
+
+            double xLeft = xTip - arrowSize * Math.Cos(angle - Math.PI / 6);
+            double yLeft = yTip - arrowSize * Math.Sin(angle - Math.PI / 6);
+            double xRight = xTip - arrowSize * Math.Cos(angle + Math.PI / 6);
+            double yRight = yTip - arrowSize * Math.Sin(angle + Math.PI / 6);
+
+            var arrow = new Polygon
+            {
+                Points = new PointCollection { new Point(xTip, yTip), new Point(xLeft, yLeft), new Point(xRight, yRight) },
+                Fill = Brushes.Blue
+            };
+            _profileCanvas.Children.Add(arrow);
+        }
+
+        private void HighlightParameter(string paramName)
+        {
+            foreach (UIElement element in _profileCanvas.Children)
+            {
+                if (element is Rectangle rect)
+                {
+                    string tag = rect.Tag?.ToString();
+                    if ((paramName == "b" && tag == "flange") ||
+                        (paramName == "h" && tag == "web") ||
+                        (paramName == "s" && tag == "web") ||
+                        (paramName == "t" && tag == "flange"))
+                    {
+                        rect.Stroke = Brushes.Red;
+                        rect.StrokeThickness = 3;
+                        rect.Opacity = 0.8;
+                    }
+                }
+            }
+        }
+
+        private void UnhighlightParameter(string paramName)
+        {
+            foreach (UIElement element in _profileCanvas.Children)
+            {
+                if (element is Rectangle rect)
+                {
+                    rect.Stroke = Brushes.Black;
+                    rect.StrokeThickness = 1;
+                    rect.Opacity = 1;
+                }
+            }
+        }
+
+        private void DrawCircleWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double diameter = _profileHeight;
+            double size = Math.Min(canvasW - 60, diameter);
+            if (size <= 0) size = 60;
+
+            var circle = new Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+
+            double left = (canvasW - size) / 2;
+            double top = (canvasH - size) / 2;
+            Canvas.SetLeft(circle, left);
+            Canvas.SetTop(circle, top);
+            _profileCanvas.Children.Add(circle);
+
+            // Одна выносная линия для диаметра
+            double centerX = canvasW / 2;
+            double centerY = canvasH / 2;
+            double rightX = left + size;
+
+            AddSingleDimensionLine(centerX, centerY, rightX, centerY, "⌀", _profileHeight);
+        }
+
+        private void DrawStripWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            double width = Math.Min(canvasW - 60, _profileWidth * 2);
+            double height = Math.Min(canvasH - 60, _profileHeight * 5);
+
+            if (width <= 0) width = 120;
+            if (height <= 0) height = 20;
+
+            if (width < height)
+            {
+                double temp = width;
+                width = height;
+                height = temp;
+            }
+
+            double left = (canvasW - width) / 2;
+            double top = (canvasH - height) / 2;
+
+            var rect = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+            Canvas.SetLeft(rect, left);
+            Canvas.SetTop(rect, top);
+            _profileCanvas.Children.Add(rect);
+
+            // Одна выносная линия для ширины b
+            AddSingleDimensionLine(left - 15, top + height / 2, left + width + 15, top + height / 2, "b", _profileWidth);
+        }
+        private void DrawChannelWithMainDimension()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double scale = Math.Min(canvasW / (_profileWidth + 30), canvasH / (_profileHeight + 30));
+            if (scale <= 0) scale = 1;
+
+            double centerX = canvasW / 2;
+            double centerY = canvasH / 2;
+
+            double h = _profileHeight * scale;
+            double b = _profileWidth * scale;
+            double s = _webThickness * scale;
+            if (s < 2) s = 4;
+
+            var web = new Rectangle
+            {
+                Width = s,
+                Height = h,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(web, centerX - s / 2);
+            Canvas.SetTop(web, centerY - h / 2);
+            _profileCanvas.Children.Add(web);
+
+            var topFlange = new Rectangle
+            {
+                Width = b,
+                Height = s,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(topFlange, centerX - b);
+            Canvas.SetTop(topFlange, centerY - h / 2);
+            _profileCanvas.Children.Add(topFlange);
+
+            var bottomFlange = new Rectangle
+            {
+                Width = b,
+                Height = s,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(bottomFlange, centerX - b);
+            Canvas.SetTop(bottomFlange, centerY + h / 2 - s);
+            _profileCanvas.Children.Add(bottomFlange);
+
+            // Одна выносная линия для высоты h
+            AddSingleDimensionLine(centerX, centerY - h / 2, centerX, centerY + h / 2, "h", _profileHeight);
+        }
+        private void DrawChannel()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double scale = Math.Min(canvasW / (_profileWidth + 30), canvasH / (_profileHeight + 30));
+            if (scale <= 0) scale = 1;
+
+            double centerX = canvasW / 2;
+            double centerY = canvasH / 2;
+
+            double h = _profileHeight * scale;
+            double b = _profileWidth * scale;
+            double s = _webThickness * scale;
+            if (s < 2) s = 4;
+
+            var web = new Rectangle
+            {
+                Width = s,
+                Height = h,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(web, centerX - s / 2);
+            Canvas.SetTop(web, centerY - h / 2);
+            _profileCanvas.Children.Add(web);
+
+            var topFlange = new Rectangle
+            {
+                Width = b,
+                Height = s,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(topFlange, centerX - b);
+            Canvas.SetTop(topFlange, centerY - h / 2);
+            _profileCanvas.Children.Add(topFlange);
+
+            var bottomFlange = new Rectangle
+            {
+                Width = b,
+                Height = s,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            Canvas.SetLeft(bottomFlange, centerX - b);
+            Canvas.SetTop(bottomFlange, centerY + h / 2 - s);
+            _profileCanvas.Children.Add(bottomFlange);
+        }
+
+        private void DrawCircle()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            // Радиус = диаметр / 2, масштабируем под Canvas
+            double diameter = _profileHeight; // это и есть диаметр
+            double size = Math.Min(canvasW - 40, diameter);
+            if (size <= 0) size = 60;
+
+            var circle = new Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+
+            Canvas.SetLeft(circle, (canvasW - size) / 2);
+            Canvas.SetTop(circle, (canvasH - size) / 2);
+            _profileCanvas.Children.Add(circle);
+        }
+
+        private void DrawAngle()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+
+            double width = Math.Min(canvasW - 60, _profileWidth);
+            double height = Math.Min(canvasH - 60, _profileHeight);
+            if (width <= 0) width = 60;
+            if (height <= 0) height = 60;
+
+            double thickness = Math.Min(width / 5, height / 5);
+
+            var geometry = new StreamGeometry();
+            using (var ctx = geometry.Open())
+            {
+                ctx.BeginFigure(new Point(canvasW / 2 - width / 2, canvasH / 2 - height / 2), true, true);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2, canvasH / 2 - height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2, canvasH / 2 + height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2 - thickness, canvasH / 2 + height / 2), true, false);
+                ctx.LineTo(new Point(canvasW / 2 + width / 2 - thickness, canvasH / 2 - height / 2 + thickness), true, false);
+                ctx.LineTo(new Point(canvasW / 2 - width / 2, canvasH / 2 - height / 2 + thickness), true, false);
+            }
+
+            var angle = new System.Windows.Shapes.Path
+            {
+                Data = geometry,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 1
+            };
+            _profileCanvas.Children.Add(angle);
+        }
+
+        private void DrawRectangle()
+        {
+            double canvasW = _profileCanvas.Width;
+            double canvasH = _profileCanvas.Height;
+            double width = Math.Min(canvasW - 40, _profileWidth);
+            double height = Math.Min(canvasH - 40, _profileHeight);
+            if (width <= 0) width = 60;
+            if (height <= 0) height = 60;
+
+            var rect = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                Fill = Brushes.LightGray,
+                Stroke = Brushes.Black,
+                StrokeThickness = 2
+            };
+            Canvas.SetLeft(rect, (canvasW - width) / 2);
+            Canvas.SetTop(rect, (canvasH - height) / 2);
+            _profileCanvas.Children.Add(rect);
+        }
+
+        private void AddDimensions()
+        {
+            string dimensionText = "";
+
+            if (_profileType == "Круглый")
+            {
+                dimensionText = $"⌀ = {_profileHeight:F1} мм";
+            }
+            else if (_profileType == "Квадратный")
+            {
+                dimensionText = $"a = {_profileHeight:F1} мм";
+            }
+            else if (_profileType == "Полосовой")
+            {
+                dimensionText = $"b = {_profileWidth:F1} мм\na = {_profileHeight:F1} мм";
+            }
+            else if (_profileType == "Уголок")
+            {
+                dimensionText = $"b = {_profileWidth:F1} мм\na = {_profileHeight:F1} мм";
+            }
+            else if (_profileType == "Швеллер")
+            {
+                dimensionText = $"h = {_profileHeight:F1} мм\nb = {_profileWidth:F1} мм\ns = {_webThickness:F1} мм";
+            }
+            else if (_profileType == "Двутавр")
+            {
+                dimensionText = $"h = {_profileHeight:F1} мм\nb = {_profileWidth:F1} мм\ns = {_webThickness:F1} мм\nt = {_flangeThickness:F1} мм";
+            }
+            else
+            {
+                dimensionText = $"h = {_profileHeight:F1} мм\nb = {_profileWidth:F1} мм";
+            }
+
+            var textBlock = new TextBlock
+            {
+                Text = dimensionText,
+                FontSize = 10,
+                Background = Brushes.White,
+                Margin = new Thickness(5),
+                Padding = new Thickness(3),
+                Foreground = Brushes.Black
+            };
+            Canvas.SetRight(textBlock, 5);
+            Canvas.SetBottom(textBlock, 5);
+            _profileCanvas.Children.Add(textBlock);
+        }
+    }
+}

@@ -1,0 +1,602 @@
+﻿using IS_GTS.Data;
+using OfficeOpenXml;
+using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Shapes;
+
+namespace IS_GTS.Windows
+{
+    public partial class ChiefEngineerWindow : Window
+    {
+        private int _currentUserId;
+        private List<CategoryStats> _categoryStats;
+        private List<ProfileStats> _profileStats;
+        private bool _isDetailed = false;
+        private string _currentCategory = "";
+
+        public ChiefEngineerWindow(int userId)
+        {
+            InitializeComponent();
+            _currentUserId = userId;
+            LoadUserInfo();
+            LoadStatistics();
+        }
+
+        private void LoadUserInfo()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var user = db.User.FirstOrDefault(u => u.UserID == _currentUserId);
+                if (user != null)
+                {
+                    UserFioTextBlock.Text = $"{user.UserLastName} {user.UserFirstName} {user.UserPatronymic}".Trim();
+                }
+                UserImage.Source = new System.Windows.Media.Imaging.BitmapImage(
+                    new Uri("/Resources/UserAvatar.png", UriKind.Relative));
+            }
+        }
+
+        private class CategoryStats
+        {
+            public string CategoryName { get; set; }
+            public int Count { get; set; }
+            public double Percentage { get; set; }
+            public SolidColorBrush Color { get; set; }
+        }
+
+        private class ProfileStats
+        {
+            public string ProfileName { get; set; }
+            public int Count { get; set; }
+            public double Percentage { get; set; }
+            public SolidColorBrush Color { get; set; }
+        }
+
+        private void LoadStatistics()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var stats = db.Favorite
+                    .Include(f => f.Size)
+                    .Include(f => f.Size.Product)
+                    .Include(f => f.Size.Product.Category)
+                    .Where(f => f.Size != null && f.Size.Product != null && f.Size.Product.Category != null)
+                    .GroupBy(f => f.Size.Product.Category.CategoryName)
+                    .Select(g => new CategoryStats
+                    {
+                        CategoryName = g.Key,
+                        Count = g.Count()
+                    })
+                    .OrderByDescending(s => s.Count)
+                    .ToList();
+
+                int total = stats.Sum(s => s.Count);
+
+                var colors = new List<Color>
+                {
+                    (Color)ColorConverter.ConvertFromString("#FFA8A8"),
+                    (Color)ColorConverter.ConvertFromString("#FFC78F"),
+                    (Color)ColorConverter.ConvertFromString("#A7D0A1"),
+                    (Color)ColorConverter.ConvertFromString("#B5E7F9"),
+                    (Color)ColorConverter.ConvertFromString("#B7BBE6"),
+                    (Color)ColorConverter.ConvertFromString("#F2A3CE"),
+                    (Color)ColorConverter.ConvertFromString("#7BE2CA"),
+                    (Color)ColorConverter.ConvertFromString("#84BBEF")
+                };
+
+                for (int i = 0; i < stats.Count; i++)
+                {
+                    stats[i].Percentage = total > 0 ? (stats[i].Count * 100.0 / total) : 0;
+                    stats[i].Color = new SolidColorBrush(colors[i % colors.Count]);
+                }
+
+                _categoryStats = stats;
+                //TotalProfilesText.Text = $"Всего профилей в избранном: {total}";
+
+                DrawCategoryChart();
+                UpdateCategoryLegend();
+            }
+        }
+
+        private void DrawCategoryChart()
+        {
+            ChartContainer.Children.Clear();
+
+            if (_categoryStats == null || !_categoryStats.Any())
+            {
+                ChartContainer.Children.Add(new TextBlock
+                {
+                    Text = "Нет данных",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                return;
+            }
+
+            double total = _categoryStats.Sum(s => s.Count);
+            if (total == 0)
+            {
+                ChartContainer.Children.Add(new TextBlock
+                {
+                    Text = "Нет данных",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                return;
+            }
+
+            var canvas = new Canvas { Width = 140, Height = 140 };
+
+            double startAngle = 0;
+            int centerX = 70;
+            int centerY = 70;
+            int radius = 60;
+
+            foreach (var stat in _categoryStats)
+            {
+                double angle = 360 * (stat.Count / total);
+                if (angle <= 0) continue;
+
+                var path = new Path
+                {
+                    Fill = stat.Color,
+                    Stroke = Brushes.White,
+                    StrokeThickness = 1,
+                    Tag = stat,
+                    Cursor = System.Windows.Input.Cursors.Hand
+                };
+
+                path.ToolTip = $"{stat.CategoryName}\nКоличество: {stat.Count}\nПроцент: {stat.Percentage:F1}%\n\nКликните для просмотра профилей";
+
+                path.MouseEnter += (s, e) =>
+                {
+                    var p = s as Path;
+                    if (p != null)
+                    {
+                        p.Opacity = 0.8;
+                        p.Stroke = Brushes.Black;
+                        p.StrokeThickness = 2;
+                    }
+                };
+
+                path.MouseLeave += (s, e) =>
+                {
+                    var p = s as Path;
+                    if (p != null)
+                    {
+                        p.Opacity = 1;
+                        p.Stroke = Brushes.White;
+                        p.StrokeThickness = 1;
+                    }
+                };
+
+                path.MouseLeftButtonUp += (s, e) =>
+                {
+                    var clickedStat = (s as Path)?.Tag as CategoryStats;
+                    if (clickedStat != null)
+                    {
+                        ShowCategoryDetails(clickedStat.CategoryName);
+                    }
+                };
+
+                double endAngle = startAngle + angle;
+
+                double startRad = startAngle * Math.PI / 180;
+                double endRad = endAngle * Math.PI / 180;
+
+                Point startPoint = new Point(centerX + radius * Math.Cos(startRad), centerY + radius * Math.Sin(startRad));
+                Point endPoint = new Point(centerX + radius * Math.Cos(endRad), centerY + radius * Math.Sin(endRad));
+
+                bool isLarge = angle > 180;
+
+                var geometry = new PathGeometry();
+                var figure = new PathFigure { StartPoint = new Point(centerX, centerY) };
+                figure.Segments.Add(new LineSegment(startPoint, true));
+                figure.Segments.Add(new ArcSegment(endPoint, new System.Windows.Size(radius, radius), 0, isLarge, SweepDirection.Clockwise, true));
+                figure.Segments.Add(new LineSegment(new Point(centerX, centerY), true));
+
+                geometry.Figures.Add(figure);
+                path.Data = geometry;
+
+                canvas.Children.Add(path);
+                startAngle = endAngle;
+            }
+
+            ChartContainer.Children.Add(canvas);
+        }
+
+        private void UpdateCategoryLegend()
+        {
+            LegendPanel.Children.Clear();
+            LegendPanel.Width = 160;
+            LegendPanel.Margin = new Thickness(15, 0, 0, 0);
+            LegendPanel.Background = new SolidColorBrush(Colors.WhiteSmoke);
+
+            foreach (var stat in _categoryStats)
+            {
+                var legendItem = new Border
+                {
+                    Background = new SolidColorBrush(Colors.White),
+                    CornerRadius = new CornerRadius(4),
+                    Margin = new Thickness(0, 3, 0, 3),
+                    Padding = new Thickness(6, 4, 6, 4),
+                    BorderBrush = new SolidColorBrush(Colors.LightGray),
+                    BorderThickness = new Thickness(0.5),
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    Tag = stat
+                };
+
+                legendItem.MouseLeftButtonUp += (s, e) =>
+                {
+                    var item = (s as Border)?.Tag as CategoryStats;
+                    if (item != null)
+                    {
+                        ShowCategoryDetails(item.CategoryName);
+                    }
+                };
+
+                var contentStack = new StackPanel { Orientation = Orientation.Horizontal };
+
+                var colorBox = new Rectangle
+                {
+                    Width = 14,
+                    Height = 14,
+                    Fill = stat.Color,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var textBlock = new TextBlock
+                {
+                    Text = $"{stat.CategoryName}\n{stat.Count} шт. ({stat.Percentage:F1}%)",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    LineHeight = 12,
+                    TextWrapping = TextWrapping.Wrap
+                };
+
+                legendItem.ToolTip = $"{stat.CategoryName}\nКоличество: {stat.Count}\nПроцент: {stat.Percentage:F1}%\n\nКликните для просмотра профилей";
+
+                contentStack.Children.Add(colorBox);
+                contentStack.Children.Add(textBlock);
+                legendItem.Child = contentStack;
+
+                LegendPanel.Children.Add(legendItem);
+            }
+        }
+
+        private void ShowCategoryDetails(string categoryName)
+        {
+            try
+            {
+                using (var db = new DiplomMurEntities())
+                {
+                    var profiles = db.Favorite
+                        .Include(f => f.Size)
+                        .Include(f => f.Size.Product)
+                        .Include(f => f.Size.Product.Category)
+                        .Where(f => f.Size != null &&
+                                    f.Size.Product != null &&
+                                    f.Size.Product.Category != null &&
+                                    f.Size.Product.Category.CategoryName == categoryName)
+                        .GroupBy(f => f.Size.SizeName)
+                        .Select(g => new ProfileStats
+                        {
+                            ProfileName = g.Key,
+                            Count = g.Count()
+                        })
+                        .OrderByDescending(p => p.Count)
+                        .ToList();
+
+                    int total = profiles.Sum(p => p.Count);
+
+                    // Ваши цвета
+                    var colors = new List<Color>
+                    {
+                        (Color)ColorConverter.ConvertFromString("#FFA8A8"),
+                        (Color)ColorConverter.ConvertFromString("#FFC78F"),
+                        (Color)ColorConverter.ConvertFromString("#A7D0A1"),
+                        (Color)ColorConverter.ConvertFromString("#B5E7F9"),
+                        (Color)ColorConverter.ConvertFromString("#B7BBE6"),
+                        (Color)ColorConverter.ConvertFromString("#F2A3CE"),
+                        (Color)ColorConverter.ConvertFromString("#7BE2CA"),
+                        (Color)ColorConverter.ConvertFromString("#84BBEF")
+                    };
+
+                    for (int i = 0; i < profiles.Count; i++)
+                    {
+                        profiles[i].Percentage = total > 0 ? (profiles[i].Count * 100.0 / total) : 0;
+                        profiles[i].Color = new SolidColorBrush(colors[i % colors.Count]);
+                    }
+
+                    _profileStats = profiles;
+                    _isDetailed = true;
+                    _currentCategory = categoryName;
+
+                    BackButton.Visibility = Visibility.Visible;
+
+                    DrawProfileChart();
+                    UpdateProfileLegend();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки профилей: {ex.Message}", "Ошибка");
+            }
+        }
+
+        private void DrawProfileChart()
+        {
+            ChartContainer.Children.Clear();
+            if (_profileStats == null || !_profileStats.Any())
+            {
+                ChartContainer.Children.Add(new TextBlock
+                {
+                    Text = "Нет данных",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                return;
+            }
+            double total = _profileStats.Sum(s => s.Count);
+            if (total == 0)
+            {
+                ChartContainer.Children.Add(new TextBlock
+                {
+                    Text = "Нет данных",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                return;
+            }
+            var canvas = new Canvas { Width = 140, Height = 140 };
+            double startAngle = 0;
+            int centerX = 70;
+            int centerY = 70;
+            int radius = 60;
+            foreach (var stat in _profileStats)
+            {
+                double angle = 360 * (stat.Count / total);
+                if (angle <= 0) continue;
+
+                var path = new Path
+                {
+                    Fill = stat.Color,
+                    Stroke = Brushes.White,
+                    StrokeThickness = 1,
+                    Tag = stat,
+                    Cursor = System.Windows.Input.Cursors.Hand
+                };
+                path.ToolTip = $"{stat.ProfileName}\nКоличество: {stat.Count}\nПроцент: {stat.Percentage:F1}%";
+                double endAngle = startAngle + angle;
+                double startRad = startAngle * Math.PI / 180;
+                double endRad = endAngle * Math.PI / 180;
+                Point startPoint = new Point(centerX + radius * Math.Cos(startRad), centerY + radius * Math.Sin(startRad));
+                Point endPoint = new Point(centerX + radius * Math.Cos(endRad), centerY + radius * Math.Sin(endRad));
+                bool isLarge = angle > 180;
+                var geometry = new PathGeometry();
+                var figure = new PathFigure { StartPoint = new Point(centerX, centerY) };
+                figure.Segments.Add(new LineSegment(startPoint, true));
+                figure.Segments.Add(new ArcSegment(endPoint, new System.Windows.Size(radius, radius), 0, isLarge, SweepDirection.Clockwise, true));
+                figure.Segments.Add(new LineSegment(new Point(centerX, centerY), true));
+                geometry.Figures.Add(figure);
+                path.Data = geometry;
+                canvas.Children.Add(path);
+                startAngle = endAngle;
+            }
+            ChartContainer.Children.Add(canvas);
+        }
+
+        private void UpdateProfileLegend()
+        {
+            LegendPanel.Children.Clear();
+            LegendPanel.Width = 160;
+            LegendPanel.Margin = new Thickness(15, 0, 0, 0);
+            LegendPanel.Background = new SolidColorBrush(Colors.WhiteSmoke);
+
+            foreach (var stat in _profileStats)
+            {
+                var legendItem = new Border
+                {
+                    Background = new SolidColorBrush(Colors.White),
+                    CornerRadius = new CornerRadius(4),
+                    Margin = new Thickness(0, 3, 0, 3),
+                    Padding = new Thickness(6, 4, 6, 4),
+                    BorderBrush = new SolidColorBrush(Colors.LightGray),
+                    BorderThickness = new Thickness(0.5)
+                };
+
+                var contentStack = new StackPanel { Orientation = Orientation.Horizontal };
+
+                var colorBox = new Rectangle
+                {
+                    Width = 14,
+                    Height = 14,
+                    Fill = stat.Color,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var textBlock = new TextBlock
+                {
+                    Text = $"{stat.ProfileName}\n{stat.Count} шт. ({stat.Percentage:F1}%)",
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    LineHeight = 12,
+                    TextWrapping = TextWrapping.Wrap
+                };
+
+                contentStack.Children.Add(colorBox);
+                contentStack.Children.Add(textBlock);
+                legendItem.Child = contentStack;
+
+                LegendPanel.Children.Add(legendItem);
+            }
+        }
+
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            _isDetailed = false;
+            _currentCategory = "";
+            _profileStats = null;
+            BackButton.Visibility = Visibility.Collapsed;
+
+            DrawCategoryChart();
+            UpdateCategoryLegend();
+        }
+
+        private void ExportStatsToExcel_Click(object sender, RoutedEventArgs e)
+        {
+            using (var package = new ExcelPackage())
+            {
+                var worksheet = package.Workbook.Worksheets.Add("Полная статистика");
+
+                // Заголовок
+                worksheet.Cells[1, 1].Value = "Полная статистика избранного (с разбивкой по категориям)";
+                worksheet.Cells[1, 1].Style.Font.Bold = true;
+                worksheet.Cells[1, 1].Style.Font.Size = 14;
+                worksheet.Cells[2, 1].Value = $"Дата формирования: {DateTime.Now:dd.MM.yyyy HH:mm}";
+
+                int currentRow = 4;
+
+                // Получаем все категории с их профилями
+                using (var db = new DiplomMurEntities())
+                {
+                    var categories = db.Favorite
+                        .Include(f => f.Size)
+                        .Include(f => f.Size.Product)
+                        .Include(f => f.Size.Product.Category)
+                        .Where(f => f.Size != null && f.Size.Product != null && f.Size.Product.Category != null)
+                        .GroupBy(f => f.Size.Product.Category.CategoryName)
+                        .Select(g => new { CategoryName = g.Key, TotalCount = g.Count() })
+                        .OrderByDescending(c => c.TotalCount)
+                        .ToList();
+
+                    foreach (var category in categories)
+                    {
+                        // Заголовок категории
+                        worksheet.Cells[currentRow, 1].Value = category.CategoryName;
+                        worksheet.Cells[currentRow, 1].Style.Font.Bold = true;
+                        worksheet.Cells[currentRow, 1].Style.Font.Size = 12;
+                        worksheet.Cells[currentRow, 1].Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                        worksheet.Cells[currentRow, 1].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGray);
+                        currentRow++;
+
+                        // Заголовки колонок для категории
+                        worksheet.Cells[currentRow, 1].Value = "Профиль";
+                        worksheet.Cells[currentRow, 2].Value = "Количество в избранном";
+                        worksheet.Cells[currentRow, 3].Value = "Процент в категории";
+                        worksheet.Cells[currentRow, 1, currentRow, 3].Style.Font.Bold = true;
+                        currentRow++;
+
+                        // Получаем профили для текущей категории
+                        var profiles = db.Favorite
+                            .Include(f => f.Size)
+                            .Include(f => f.Size.Product)
+                            .Include(f => f.Size.Product.Category)
+                            .Where(f => f.Size != null &&
+                                        f.Size.Product != null &&
+                                        f.Size.Product.Category != null &&
+                                        f.Size.Product.Category.CategoryName == category.CategoryName)
+                            .GroupBy(f => f.Size.SizeName)
+                            .Select(g => new { ProfileName = g.Key, Count = g.Count() })
+                            .OrderByDescending(p => p.Count)
+                            .ToList();
+
+                        int categoryTotal = profiles.Sum(p => p.Count);
+
+                        // Данные профилей
+                        foreach (var profile in profiles)
+                        {
+                            double percentage = categoryTotal > 0 ? (profile.Count * 100.0 / categoryTotal) : 0;
+                            worksheet.Cells[currentRow, 1].Value = profile.ProfileName;
+                            worksheet.Cells[currentRow, 2].Value = profile.Count;
+                            worksheet.Cells[currentRow, 3].Value = $"{percentage:F1}%";
+                            currentRow++;
+                        }
+
+                        // Итог по категории
+                        worksheet.Cells[currentRow, 1].Value = "ИТОГО по категории:";
+                        worksheet.Cells[currentRow, 2].Value = categoryTotal;
+                        worksheet.Cells[currentRow, 2].Style.Font.Bold = true;
+                        worksheet.Cells[currentRow, 3].Value = "100%";
+                        worksheet.Cells[currentRow, 1, currentRow, 3].Style.Font.Bold = true;
+                        currentRow += 2; // Пустая строка между категориями
+                    }
+                }
+
+                worksheet.Cells.AutoFitColumns();
+
+                var saveDialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "Excel файлы|*.xlsx",
+                    FileName = $"Полная_статистика_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                };
+
+                if (saveDialog.ShowDialog() == true)
+                {
+                    System.IO.File.WriteAllBytes(saveDialog.FileName, package.GetAsByteArray());
+                    MessageBox.Show("Экспорт выполнен успешно!", "Успех");
+                }
+            }
+        }
+
+        private void OpenFavorites_Click(object sender, RoutedEventArgs e)
+        {
+            var favoritesWindow = new FavoriteWindow(_currentUserId);
+            favoritesWindow.ShowDialog();
+        }
+
+        private void LogoutButton_Click(object sender, RoutedEventArgs e)
+        {
+            var authWindow = new AuthWindow();
+            authWindow.Show();
+            this.Close();
+        }
+
+        private void UserInfoBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var profileWindow = new UserProfileWindow(_currentUserId);
+            profileWindow.ShowDialog();
+        }
+
+        private void RefreshStatsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isDetailed)
+            {
+                ShowCategoryDetails(_currentCategory);
+            }
+            else
+            {
+                LoadStatistics();
+            }
+        }
+
+        private void OpenSearchWindow_Click(object sender, RoutedEventArgs e)
+        {
+            var searchWindow = new SearchWindow(_currentUserId, 3);
+            searchWindow.Show();
+        }
+
+        private void OpenComparisonWindow_Click(object sender, RoutedEventArgs e)
+        {
+            var comparisonWindow = new ComparisonWindow(_currentUserId);
+            comparisonWindow.Owner = this;
+            comparisonWindow.ShowDialog();
+        }
+
+        private void OpenGostDocuments_Click(object sender, RoutedEventArgs e)
+        {
+            var documentsWindow = new GostDocumentsWindow();
+            documentsWindow.Owner = this;
+            documentsWindow.ShowDialog();
+        }
+    }
+}

@@ -1,0 +1,500 @@
+﻿using IS_GTS.ViewModels;
+using IS_GTS.Windows;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+
+namespace IS_GTS.Windows
+{
+    /// <summary>
+    /// Логика взаимодействия для FiltersWindow.xaml
+    /// </summary>
+    public partial class FiltersWindow : Window
+    {
+        public FiltersWindow()
+        {
+            InitializeComponent();
+            DataContext = this;
+            this.Loaded += (s,e) => Init();
+
+            _isUpdatingCheckboxes = false;
+        }
+
+        public List<ColumnSetting> CurrentColumns { get; set; }
+        public List<FilterSetting> CurrentFilters { get; set; }
+        public List<string> AvailableCharacteristics { get; set; }
+
+        private List<AvailableParameter> _availableParameters = new List<AvailableParameter>();
+
+        public void Init()
+        {
+            try
+            {
+                // Если не переданы данные, создаем пустые списки
+                CurrentColumns = CurrentColumns ?? new List<ColumnSetting>();
+                CurrentFilters = CurrentFilters ?? new List<FilterSetting>();
+
+                LoadParametersFromDB();
+                ShowCurrentFilters();
+                ShowColumnSettings();
+
+                // Если переданы характеристики ГОСТа - настраиваем отображение
+                if (AvailableCharacteristics != null && AvailableCharacteristics.Any())
+                {
+                    Title = "Фильтры и настройки отображения";
+
+                    // Обновляем заголовки
+                    var filterGroupBox = this.FindName("FilterGroupBox") as GroupBox;
+                    if (filterGroupBox != null)
+                        filterGroupBox.Header = "Добавление фильтров по характеристикам ГОСТа";
+
+                    var columnGroupBox = this.FindName("ColumnSettingsGroupBox") as GroupBox;
+                    if (columnGroupBox != null)
+                        columnGroupBox.Header = "Отображаемые характеристики ГОСТа";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка инициализации: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void LoadParametersFromDB()
+        {
+            try
+            {
+                _availableParameters.Clear();
+
+                if (AvailableCharacteristics != null && AvailableCharacteristics.Any())
+                {
+                    // Режим 1: Используем только характеристики текущего ГОСТа
+                    var context = Data.DiplomMurEntities.GetContext();
+
+                    foreach (var charName in AvailableCharacteristics.OrderBy(c => c))
+                    {
+                        // Пытаемся найти характеристику в БД
+                        var charFromDb = context.Characteristic
+                            .FirstOrDefault(c => c.CharactName == charName);
+
+                        _availableParameters.Add(new AvailableParameter
+                        {
+                            ID = charFromDb?.CharactID ?? 0,
+                            Name = charName,
+                            Unit = charFromDb?.CharactDefaultUnit ?? ""
+                        });
+                    }
+
+                    // Также создаем настройки колонок для этих характеристик
+                    if (CurrentColumns == null || !CurrentColumns.Any())
+                    {
+                        CurrentColumns = new List<ColumnSetting>();
+
+                        // Первая колонка "Профиль" всегда есть
+                        CurrentColumns.Add(new ColumnSetting
+                        {
+                            FieldName = "ProductName",
+                            DisplayName = "Профиль",
+                            IsVisible = true,
+                            IsEnabled = true,
+                            Width = 120
+                        });
+
+                        // Добавляем все характеристики как колонки
+                        foreach (var param in _availableParameters)
+                        {
+                            CurrentColumns.Add(new ColumnSetting
+                            {
+                                FieldName = param.Name,
+                                DisplayName = string.IsNullOrEmpty(param.Unit)
+                                    ? param.Name
+                                    : $"{param.Name} ({param.Unit})",
+                                IsVisible = true, // по умолчанию все видимы
+                                Width = CalculateColumnWidth(param.Name)
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    // Режим 2: Старая логика для SearchWindow
+                    var context = Data.DiplomMurEntities.GetContext();
+
+                    var characteristics = context.Characteristic
+                .OrderBy(c => c.CharactName)
+                .Select(c => new AvailableParameter
+                {
+                    ID = c.CharactID,
+                    Name = c.CharactName,
+                    Unit = c.CharactDefaultUnit ?? ""
+                })
+                .ToList();
+
+                    _availableParameters = characteristics;
+                }
+
+                // Обновляем ComboBox
+                NewParameterComboBox.ItemsSource = null;
+                NewParameterComboBox.ItemsSource = _availableParameters;
+                NewParameterComboBox.DisplayMemberPath = "DisplayName";
+
+                if (_availableParameters.Any())
+                {
+                    NewParameterComboBox.SelectedIndex = 0;
+                }
+                else
+                {
+                    UnitTextBlock.Text = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки параметров: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+
+        }
+
+        private double CalculateColumnWidth(string paramName)
+        {
+            int length = paramName.Length;
+
+            if (length < 10) return 100;
+            if (length < 15) return 120;
+            if (length < 20) return 140;
+            return 160;
+        }
+
+        private void ShowCurrentFilters()
+        {
+            ActiveFiltersItemsControl.ItemsSource = null;
+            ActiveFiltersItemsControl.ItemsSource = CurrentFilters;
+
+            // Обновляем текст, если нет фильтров
+            if (CurrentFilters == null || !CurrentFilters.Any())
+            {
+                var emptyTextBlock = new TextBlock
+                {
+                    Text = "Нет активных фильтров",
+                    FontStyle = FontStyles.Italic,
+                    Foreground = Brushes.Gray,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 20, 0, 20)
+                };
+
+                // Можно добавить сообщение, но проще оставить пустой список
+            }
+        }
+
+        private void ShowColumnSettings()
+        {
+            // Отключаем обновление на время изменения
+            _isUpdatingCheckboxes = true;
+
+            try
+            {
+                ColumnSettingsItemsControl.ItemsSource = null;
+                ColumnSettingsItemsControl.ItemsSource = CurrentColumns;
+
+                // Обновляем состояние чекбокса "Показать все"
+                if (SelectAllCheckBox != null && CurrentColumns != null)
+                {
+                    UpdateSelectAllCheckboxState();
+                }
+            }
+            finally
+            {
+                _isUpdatingCheckboxes = false;
+            }
+        }
+
+        private void AddFilter_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedParameter = NewParameterComboBox.SelectedItem as AvailableParameter;
+                if (selectedParameter == null)
+                {
+                    MessageBox.Show("Выберите параметр из списка",
+                        "Внимание", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Проверяем минимальное значение
+                if (!double.TryParse(MinValueTextBox.Text, out double minValue))
+                {
+                    MessageBox.Show("Введите корректное число в поле 'от'",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MinValueTextBox.Focus();
+                    return;
+                }
+
+                // Проверяем максимальное значение
+                if (!double.TryParse(MaxValueTextBox.Text, out double maxValue))
+                {
+                    MessageBox.Show("Введите корректное число в поле 'до'",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MaxValueTextBox.Focus();
+                    return;
+                }
+
+                // Проверяем диапазон
+                if (minValue >= maxValue)
+                {
+                    MessageBox.Show("Минимальное значение должно быть меньше максимального",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // Проверяем, не добавлен ли уже этот параметр
+                if (CurrentFilters.Any(f => f.ParameterName == selectedParameter.Name))
+                {
+                    MessageBox.Show($"Параметр '{selectedParameter.Name}' уже добавлен в фильтры",
+                        "Внимание", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Создаем новый фильтр
+                var newFilter = new FilterSetting
+                {
+                    ParameterName = selectedParameter.Name,
+                    Unit = selectedParameter.Unit,
+                    MinValue = minValue,
+                    MaxValue = maxValue
+                };
+                CurrentFilters.Add(newFilter);
+                ShowCurrentFilters();
+
+                // Очищаем поля ввода
+                MinValueTextBox.Clear();
+                MaxValueTextBox.Clear();
+
+                // Устанавливаем фокус на минимальное значение для следующего ввода
+                MinValueTextBox.Focus();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при добавлении фильтра: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ResetAll_Click(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show(
+                "Вы уверены, что хотите сбросить все фильтры и настройки колонок?",
+                "Подтверждение сброса",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                // Сбрасываем фильтры
+                CurrentFilters.Clear();
+
+                // Сбрасываем видимость колонок (если есть)
+                if (CurrentColumns != null)
+                {
+                    foreach (var column in CurrentColumns)
+                    {
+                        // Основные колонки всегда видимы
+                        column.IsVisible = column.FieldName == "Name" ||
+                                         column.FieldName == "GostNumber" ||
+                                         column.FieldName == "Material" ||
+                                         column.FieldName == "Category";
+                    }
+                }
+
+                ShowCurrentFilters();
+                ShowColumnSettings();
+            }
+        }
+
+        private void ApplySettings_Click(object sender, RoutedEventArgs e)
+        {
+            this.DialogResult = true;
+            this.Close();
+        }
+
+        private void RemoveFilter_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var button = sender as Button;
+                if (button?.Tag is string parameterName)
+                {
+                    var filterToRemove = CurrentFilters.FirstOrDefault(f => f.ParameterName == parameterName);
+                    if (filterToRemove != null)
+                    {
+                        CurrentFilters.Remove(filterToRemove);
+                        ShowCurrentFilters();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при удалении фильтра: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+
+        
+
+        private void NewParameterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            try
+            {
+                var selectedParameter = NewParameterComboBox.SelectedItem as AvailableParameter;
+                if (selectedParameter != null)
+                {
+                    UnitTextBlock.Text = string.IsNullOrEmpty(selectedParameter.Unit)
+                        ? ""
+                        : $"({selectedParameter.Unit})";
+                }
+                else
+                {
+                    UnitTextBlock.Text = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе параметра: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            // Закрытие окна по Escape
+            if (e.Key == Key.Escape)
+            {
+                this.DialogResult = false;
+                this.Close();
+            }
+        }
+
+        private void SelectAllCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            if (CurrentColumns == null || _isUpdatingCheckboxes) return;
+
+            try
+            {
+                _isUpdatingCheckboxes = true;
+
+                // Делаем ВСЕ колонки видимыми
+                foreach (var column in CurrentColumns)
+                {
+                    // Колонку "Профиль" всегда оставляем видимой
+                    if (column.FieldName != "ProductName")
+                    {
+                        column.IsVisible = true;
+                    }
+                }
+
+                // Обновляем отображение
+                ShowColumnSettings();
+            }
+            finally
+            {
+                _isUpdatingCheckboxes = false;
+            }
+        }
+
+        private void SelectAllCheckBox_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (CurrentColumns == null || _isUpdatingCheckboxes) return;
+
+            try
+            {
+                _isUpdatingCheckboxes = true;
+
+                // Скрываем все колонки, кроме "Профиль"
+                foreach (var column in CurrentColumns)
+                {
+                    if (column.FieldName != "ProductName")
+                    {
+                        column.IsVisible = false;
+                    }
+                }
+
+                // Обновляем отображение
+                ShowColumnSettings();
+            }
+            finally
+            {
+                _isUpdatingCheckboxes = false;
+            }
+        }
+
+        private void ColumnCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            UpdateSelectAllCheckboxState();
+
+        }
+
+        private void ColumnCheckBox_Unchecked(object sender, RoutedEventArgs e)
+        {
+            UpdateSelectAllCheckboxState();
+
+        }
+
+        private bool _isUpdatingCheckboxes = false;
+
+        // Метод обновления состояния чекбокса "Показать все"
+        private void UpdateSelectAllCheckboxState()
+        {
+            if (CurrentColumns == null || _isUpdatingCheckboxes || SelectAllCheckBox == null) 
+        return;
+
+            try
+            {
+                _isUpdatingCheckboxes = true;
+
+                // Получаем все колонки кроме "Профиль"
+                var nonProfileColumns = CurrentColumns
+                    .Where(c => c.FieldName != "ProductName")
+                    .ToList();
+
+                if (nonProfileColumns.Any())
+                {
+                    // Проверяем состояния
+                    bool allChecked = nonProfileColumns.All(c => c.IsVisible);
+                    bool allUnchecked = nonProfileColumns.All(c => !c.IsVisible);
+
+                    // Устанавливаем состояние чекбокса "Показать все"
+                    if (allChecked)
+                    {
+                        SelectAllCheckBox.IsChecked = true;
+                    }
+                    else if (allUnchecked)
+                    {
+                        SelectAllCheckBox.IsChecked = false;
+                    }
+                    else
+                    {
+                        // Частичный выбор - неопределенное состояние
+                        SelectAllCheckBox.IsChecked = null;
+                    }
+                }
+            }
+            finally
+            {
+                _isUpdatingCheckboxes = false;
+            }
+        }
+    }
+}
+
+

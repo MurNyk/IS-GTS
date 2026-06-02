@@ -1,0 +1,492 @@
+﻿using IS_GTS.Data;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
+
+namespace IS_GTS.Windows
+{
+    public partial class ComparisonWindow : Window
+    {
+        private int _currentUserId;
+        private List<ComparisonItem> _comparisonItems;
+        private List<string> _allGosts;
+
+        public class ComparisonItem : INotifyPropertyChanged
+        {
+            private bool _isSelected;
+
+            public int SizeID { get; set; }
+            public string ProductName { get; set; }
+
+            public bool IsSelected
+            {
+                get => _isSelected;
+                set
+                {
+                    _isSelected = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+                }
+            }
+
+            public Dictionary<string, string> Characteristics { get; set; } = new Dictionary<string, string>();
+
+            public event PropertyChangedEventHandler PropertyChanged;
+        }
+
+        public ComparisonWindow(int currentUserId)
+        {
+            InitializeComponent();
+            _currentUserId = currentUserId;
+
+            LoadMaterials();
+            LoadAllGosts();
+            LoadAllCategories();
+
+            MaterialComboBox.SelectionChanged += MaterialComboBox_SelectionChanged;
+            CategoryComboBox.SelectionChanged += CategoryComboBox_SelectionChanged;
+
+            SetupBaseColumns();
+
+            ProfilesDataGrid.MouseLeftButtonUp += ProfilesDataGrid_MouseLeftButtonUp;
+
+            // Изначально панель действий заблокирована
+            EnableActionPanel(false);
+        }
+
+        private void SetupBaseColumns()
+        {
+            ProfilesDataGrid.Columns.Clear();
+
+            ProfilesDataGrid.Columns.Add(new DataGridCheckBoxColumn
+            {
+                Header = "Выбрать",
+                Binding = new Binding("IsSelected") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                Width = 60
+            });
+
+            ProfilesDataGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Профиль",
+                Binding = new Binding("ProductName"),
+                Width = 180,
+                IsReadOnly = true
+            });
+        }
+
+        private void LoadAllCategories()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var categories = new List<string> { "Все категории" };
+                categories.AddRange(db.Category
+                    .Select(c => c.CategoryName)
+                    .Distinct()
+                    .OrderBy(c => c)
+                    .ToList());
+
+                CategoryComboBox.ItemsSource = categories;
+                CategoryComboBox.SelectedIndex = 0;
+            }
+        }
+
+        private void LoadMaterials()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var materials = new List<string> { "Все материалы" };
+                materials.AddRange(db.Material
+                    .Select(m => m.MaterialName)
+                    .Distinct()
+                    .OrderBy(m => m)
+                    .ToList());
+
+                MaterialComboBox.ItemsSource = materials;
+                MaterialComboBox.SelectedIndex = 0;
+            }
+        }
+
+        private void LoadAllGosts()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                _allGosts = db.Product
+                    .Select(p => p.ProductStandartNumber)
+                    .Where(g => g != null)
+                    .Distinct()
+                    .OrderBy(g => g)
+                    .ToList();
+
+                UpdateGostList();
+            }
+        }
+
+        private void UpdateGostList()
+        {
+            string selectedMaterial = MaterialComboBox.SelectedItem?.ToString();
+            string selectedCategory = CategoryComboBox.SelectedItem?.ToString();
+
+            using (var db = new DiplomMurEntities())
+            {
+                var query = db.Product
+                    .Include(p => p.Category)
+                    .Include(p => p.Category.Material)
+                    .Where(p => p.ProductStandartNumber != null);
+
+                if (!string.IsNullOrEmpty(selectedMaterial) && selectedMaterial != "Все материалы")
+                {
+                    query = query.Where(p => p.Category.Material.MaterialName == selectedMaterial);
+                }
+
+                if (!string.IsNullOrEmpty(selectedCategory) && selectedCategory != "Все категории")
+                {
+                    query = query.Where(p => p.Category.CategoryName == selectedCategory);
+                }
+
+                var filteredGosts = query
+                    .Select(p => p.ProductStandartNumber)
+                    .Distinct()
+                    .OrderBy(g => g)
+                    .ToList();
+
+                GostListBox.ItemsSource = filteredGosts;
+            }
+        }
+
+        private void LoadCategories(string material)
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var categories = new List<string> { "Все категории" };
+
+                if (string.IsNullOrEmpty(material) || material == "Все материалы")
+                {
+                    categories.AddRange(db.Category
+                        .Select(c => c.CategoryName)
+                        .Distinct()
+                        .OrderBy(c => c)
+                        .ToList());
+                }
+                else
+                {
+                    categories.AddRange(db.Category
+                        .Include(c => c.Material)
+                        .Where(c => c.Material.MaterialName == material)
+                        .Select(c => c.CategoryName)
+                        .Distinct()
+                        .OrderBy(c => c)
+                        .ToList());
+                }
+
+                CategoryComboBox.ItemsSource = categories;
+                CategoryComboBox.SelectedIndex = 0;
+            }
+        }
+
+        private void MaterialComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            string selectedMaterial = MaterialComboBox.SelectedItem?.ToString();
+            LoadCategories(selectedMaterial);
+            UpdateGostList();
+            ClearProfilesTable();
+        }
+
+        private void CategoryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateGostList();
+            ClearProfilesTable();
+        }
+
+        private void GostListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            string selectedGost = GostListBox.SelectedItem?.ToString();
+
+            if (string.IsNullOrEmpty(selectedGost))
+            {
+                ClearProfilesTable();
+                SelectedGostTitle.Text = "Выберите ГОСТ из списка слева";
+                EnableActionPanel(false);
+                return;
+            }
+
+            SelectedGostTitle.Text = $"ГОСТ: {selectedGost}";
+            LoadProfiles(selectedGost);
+            EnableActionPanel(true);
+        }
+
+        private void ClearProfilesTable()
+        {
+            _comparisonItems = null;
+            ProfilesDataGrid.ItemsSource = null;
+            SelectionInfoText.Text = "Выбрано: 0 из 3 (максимум)";
+            CompareButton.IsEnabled = false;
+            ClearButton.IsEnabled = false;
+        }
+
+        private void LoadProfiles(string selectedGost)
+        {
+            try
+            {
+                using (var db = new DiplomMurEntities())
+                {
+                    var sizes = db.Size
+                        .Include(s => s.Product)
+                        .Include(s => s.Product.Category)
+                        .Include(s => s.Product.Category.Material)
+                        .Where(s => s.Product.ProductStandartNumber == selectedGost)
+                        .ToList();
+
+                    if (!sizes.Any())
+                    {
+                        ClearProfilesTable();
+                        SelectionInfoText.Text = "Нет профилей для выбранного ГОСТа";
+                        EnableActionPanel(false);
+                        return;
+                    }
+
+                    var sizeIds = sizes.Select(s => s.SizeID).ToList();
+                    var allCharacteristics = db.CharacteristicValue
+                        .Include(cv => cv.Characteristic)
+                        .Where(cv => sizeIds.Contains(cv.ValueSizeID))
+                        .ToList();
+
+                    var characteristicsBySize = allCharacteristics
+                        .GroupBy(cv => cv.ValueSizeID)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+
+                    _comparisonItems = new List<ComparisonItem>();
+
+                    foreach (var size in sizes)
+                    {
+                        var item = new ComparisonItem
+                        {
+                            SizeID = size.SizeID,
+                            ProductName = size.SizeName,
+                            IsSelected = false
+                        };
+
+                        if (characteristicsBySize.ContainsKey(size.SizeID))
+                        {
+                            foreach (var cv in characteristicsBySize[size.SizeID])
+                            {
+                                if (cv.Characteristic != null)
+                                {
+                                    string unit = cv.ValueUnit ?? cv.Characteristic.CharactDefaultUnit ?? "";
+                                    string value = FormatValue(cv, unit);
+                                    if (!string.IsNullOrEmpty(value))
+                                    {
+                                        item.Characteristics[cv.Characteristic.CharactName] = value;
+                                    }
+                                }
+                            }
+                        }
+
+                        _comparisonItems.Add(item);
+                    }
+
+                    ProfilesDataGrid.ItemsSource = _comparisonItems;
+                    BuildDynamicColumns();
+                    UpdateSelectionInfo();
+                    ClearButton.IsEnabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка");
+                EnableActionPanel(false);
+            }
+        }
+
+        private string FormatValue(CharacteristicValue cv, string unit)
+        {
+            if (cv.ValueTolerance.HasValue && !string.IsNullOrEmpty(cv.ValueToleranceDirection))
+            {
+                return $"{cv.ValueToleranceDirection}{cv.ValueTolerance.Value:F2} {unit}".Trim();
+            }
+            if (cv.ValueNumeric.HasValue)
+            {
+                return $"{cv.ValueNumeric.Value:F2} {unit}".Trim();
+            }
+            if (!string.IsNullOrEmpty(cv.ValueString))
+            {
+                return $"{cv.ValueString} {unit}".Trim();
+            }
+            return "";
+        }
+
+        private void BuildDynamicColumns()
+        {
+            if (_comparisonItems == null || !_comparisonItems.Any()) return;
+            _comparisonItems = _comparisonItems.OrderBy(p => p.SizeID).ToList();
+
+            Style standardCellStyle = new Style(typeof(DataGridCell));
+            standardCellStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
+            standardCellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            standardCellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(4)));
+            standardCellStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Center));
+            standardCellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.LightGray));
+            standardCellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
+
+            Style profileCellStyle = new Style(typeof(DataGridCell));
+            profileCellStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.Wrap));
+            profileCellStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            profileCellStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(4)));
+            profileCellStyle.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, TextAlignment.Left));
+            profileCellStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Brushes.LightGray));
+            profileCellStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0, 0, 1, 1)));
+
+            if (ProfilesDataGrid.Columns.Count > 0)
+                ProfilesDataGrid.Columns[0].CellStyle = standardCellStyle;
+            if (ProfilesDataGrid.Columns.Count > 1)
+                ProfilesDataGrid.Columns[1].CellStyle = profileCellStyle;
+
+            while (ProfilesDataGrid.Columns.Count > 2)
+            {
+                ProfilesDataGrid.Columns.RemoveAt(2);
+            }
+
+            var uniqueCharacteristics = new HashSet<string>();
+            foreach (var item in _comparisonItems)
+            {
+                foreach (var charName in item.Characteristics.Keys)
+                {
+                    uniqueCharacteristics.Add(charName);
+                }
+            }
+
+            foreach (var charName in uniqueCharacteristics.OrderBy(c => c))
+            {
+                var column = new DataGridTextColumn
+                {
+                    Header = charName,
+                    Binding = new Binding($"Characteristics[{charName}]") { FallbackValue = "—" },
+                    Width = 100,
+                    IsReadOnly = true,
+                    CellStyle = standardCellStyle
+                };
+                ProfilesDataGrid.Columns.Add(column);
+            }
+        }
+
+        private void ProfilesDataGrid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            var hitTest = VisualTreeHelper.HitTest(ProfilesDataGrid, e.GetPosition(ProfilesDataGrid));
+            var row = FindVisualParent<DataGridRow>(hitTest.VisualHit);
+
+            if (row?.DataContext is ComparisonItem item)
+            {
+                int selectedCount = _comparisonItems.Count(i => i.IsSelected);
+
+                if (selectedCount >= 3 && !item.IsSelected)
+                {
+                    MessageBox.Show("Можно выбрать не более 3 профилей для сравнения", "Внимание");
+                    return;
+                }
+
+                item.IsSelected = !item.IsSelected;
+                UpdateSelectionInfo();
+            }
+        }
+
+        private static T FindVisualParent<T>(DependencyObject child) where T : DependencyObject
+        {
+            while (child != null)
+            {
+                if (child is T)
+                    return (T)child;
+                child = VisualTreeHelper.GetParent(child);
+            }
+            return null;
+        }
+
+        private void UpdateSelectionInfo()
+        {
+            if (_comparisonItems == null)
+            {
+                SelectionInfoText.Text = "Выбрано: 0 из 3 (максимум)";
+                CompareButton.IsEnabled = false;
+                return;
+            }
+
+            int selectedCount = _comparisonItems.Count(i => i.IsSelected);
+
+            if (selectedCount == 0)
+            {
+                SelectionInfoText.Text = "Выбрано: 0 из 3 (минимум 2 для сравнения)";
+                CompareButton.IsEnabled = false;
+            }
+            else if (selectedCount == 1)
+            {
+                SelectionInfoText.Text = "Выбрано: 1 из 3 (нужно выбрать ещё 1)";
+                CompareButton.IsEnabled = false;
+            }
+            else if (selectedCount >= 2 && selectedCount <= 3)
+            {
+                SelectionInfoText.Text = $"Выбрано: {selectedCount} из 3 можно сравнивать";
+                CompareButton.IsEnabled = true;
+            }
+            else
+            {
+                SelectionInfoText.Text = "Выбрано более 3 (снимите лишние)";
+                CompareButton.IsEnabled = false;
+            }
+        }
+
+        private void EnableActionPanel(bool enabled)
+        {
+            ClearButton.IsEnabled = enabled;
+
+            if (enabled && _comparisonItems != null)
+            {
+                int selectedCount = _comparisonItems.Count(i => i.IsSelected);
+                CompareButton.IsEnabled = selectedCount >= 2 && selectedCount <= 3;
+            }
+            else if (!enabled)
+            {
+                CompareButton.IsEnabled = false;
+            }
+
+            if (!enabled)
+            {
+                SelectionInfoText.Text = "Выберите ГОСТ для начала работы";
+            }
+        }
+
+        private void ClearSelectionButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_comparisonItems != null)
+            {
+                foreach (var item in _comparisonItems)
+                {
+                    item.IsSelected = false;
+                }
+                UpdateSelectionInfo();
+            }
+        }
+
+        private void CompareButton_Click(object sender, RoutedEventArgs e)
+        {
+            var selectedItems = _comparisonItems.Where(i => i.IsSelected).ToList();
+            if (selectedItems.Count < 2 || selectedItems.Count > 3)
+            {
+                MessageBox.Show("Выберите 2 или 3 профиля для сравнения", "Внимание");
+                return;
+            }
+
+            var resultWindow = new ComparisonResultWindow(selectedItems);
+            resultWindow.Owner = this;
+            resultWindow.ShowDialog();
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+    }
+}

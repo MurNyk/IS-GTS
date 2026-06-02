@@ -1,0 +1,494 @@
+﻿using IS_GTS.Data;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data.Entity;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using IS_GTS.ViewModels;
+using System.IO;
+
+
+namespace IS_GTS.Windows
+{
+    /// <summary>
+    /// Логика взаимодействия для SearchWindow.xaml
+    /// </summary>
+    public partial class SearchWindow : Window
+    {
+        private int _currentUserId;
+        private int _currentUserRole;
+        public SearchWindow(int userId, int userRole)
+        {
+            InitializeComponent();
+            DataContext = this;
+
+            // Сохраняем в App для совместимости с существующим кодом
+            App.CurrentUserID = userId;
+            App.CurrentUserRole = userRole;
+
+            _currentUserId = userId;
+            _currentUserRole = userRole;
+
+            LoadUserInfo();
+            Init();
+        }
+
+        private List<ProductItem> _filteredProducts = new List<ProductItem>();
+        private List<ColumnSetting> _columnSettings = new List<ColumnSetting>();
+        private List<FilterSetting> _currentFilters = new List<FilterSetting>();
+        private Border _currentMessageBorder;
+
+
+
+        private void LoadUserInfo()
+        {
+            try
+            {
+                if (App.CurrentUserID > 0)
+                {
+                    // ВАЖНО: НЕ используем using!
+                    var context = DiplomMurEntities.GetContext();
+
+                    // Отключаем ленивую загрузку для этого запроса
+                    context.Configuration.LazyLoadingEnabled = false;
+
+                    var user = context.User
+                        .Include(u => u.Role)
+                        .FirstOrDefault(u => u.UserID == App.CurrentUserID);
+
+                    if (user != null)
+                    {
+                        // Сохраняем данные в локальные переменные
+                        string fullName = $"{user.UserLastName} {user.UserFirstName} {user.UserPatronymic}".Trim();
+                        string roleName = user.Role?.RoleName ?? "Пользователь";
+
+                        // Обновляем UI
+                        UserFioTextBlock.Text = fullName;
+                        RoleTextBlock.Text = roleName;
+                        UserImage.Source = new BitmapImage(new Uri("/Resources/UserAvatar.png", UriKind.Relative));
+                    }
+
+                    // Включаем обратно, если нужно где-то еще
+                    context.Configuration.LazyLoadingEnabled = true;
+                }
+                else
+                {
+                    UserFioTextBlock.Text = "Гость";
+                    RoleTextBlock.Text = "не авторизован";
+                    UserImage.Source = new BitmapImage(new Uri("/Resources/guest_avatar.png", UriKind.Relative));
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки данных пользователя: {ex.Message}");
+            }
+        }
+
+        private void UserInfoBtn_Click(object sender, RoutedEventArgs e)
+        {
+            // Здесь открываем окно с информацией о пользователе
+            // Например, окно профиля или настройки
+
+            //MessageBox.Show("Здесь будет окно профиля пользователя",
+            //               "Информация",
+            //               MessageBoxButton.OK,
+            //               MessageBoxImage.Information);
+
+            //В будущем можно открывать отдельное окно:
+             var profileWindow = new UserProfileWindow(App.CurrentUserID);
+            profileWindow.Owner = this;
+            profileWindow.ShowDialog();
+        }
+
+
+        public void Init()
+        {
+            try
+            {
+                LoadMaterials();
+                LoadCategories();
+
+                SetupDefaultColumns();
+
+                ShowWelcomeMessage();
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show($"Ошибка инициализации: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void LoadMaterials()
+        {
+            var materials = Data.DiplomMurEntities.GetContext().Material
+                .OrderBy(m=>m.MaterialName)
+                .Select(m=>m.MaterialName)
+                .ToList();
+
+            MaterialComboBox.Items.Clear();
+            MaterialComboBox.Items.Add("Все материалы");
+
+            foreach (var material in materials)
+            {
+                MaterialComboBox.Items.Add(material);
+            }
+            MaterialComboBox.SelectedIndex = 0;
+        }
+
+        private void LoadCategories()
+        {
+            var categories = Data.DiplomMurEntities.GetContext().Category
+                .OrderBy(c => c.CategorySortOrder)
+                .Select(c => c.CategoryName)
+                .ToList();
+
+            TypeComboBox.Items.Clear();
+            TypeComboBox.Items.Add("Все типы");
+
+            foreach(var category in categories)
+            {
+                TypeComboBox.Items.Add(category);
+            }
+            TypeComboBox.SelectedIndex = 0;
+        }
+
+        private void SetupDefaultColumns()
+        {
+            _columnSettings = new List<ColumnSetting>
+            {
+                new ColumnSetting {FieldName="Name", DisplayName = "Профиль", IsVisible=true, Width=200},
+                new ColumnSetting {FieldName="GostNumber", DisplayName = "ГОСТ", IsVisible=true, Width=120},
+                new ColumnSetting {FieldName="Material", DisplayName = "Материал", IsVisible=true, Width=150},
+                new ColumnSetting {FieldName="Category", DisplayName = "Категория", IsVisible=true, Width=150}
+            };
+        }
+
+        private void ShowWelcomeMessage()
+        {
+            RemoveCurrentMessage();
+            ResultsDataGrid.Visibility = Visibility.Collapsed;
+
+            var welcomeGrid = new Grid();
+
+            var textBlock = new TextBlock
+            {
+                Text = "Выберите ГОСТ для начала работы",
+                FontSize = 20,
+                FontWeight = FontWeights.Light,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Foreground = Brushes.Gray
+            };
+
+            var subTextBlock = new TextBlock
+            {
+                Text = "Используйте фильтры выше для поиска нужного профиля",
+                FontSize = 14,
+                FontWeight = FontWeights.Light,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Foreground = Brushes.DarkGray,
+                Margin = new Thickness(0, 60, 0, 0)
+            };
+
+            welcomeGrid.Children.Add(textBlock);
+            welcomeGrid.Children.Add(subTextBlock);
+
+            // СОХРАНЯЕМ ссылку на Border в поле!
+            _currentMessageBorder = new Border
+            {
+                Child = welcomeGrid,
+                Background = Brushes.White,
+                BorderBrush = Brushes.LightGray, 
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Margin = new Thickness(20)
+            };
+
+            var mainGrid = ResultsDataGrid.Parent as Grid;
+            if (mainGrid != null)
+            {
+                Grid.SetRow(_currentMessageBorder, 2);
+                Grid.SetColumnSpan(_currentMessageBorder, 1);
+                mainGrid.Children.Add(_currentMessageBorder);
+            }
+        }
+
+        private void RemoveCurrentMessage()
+        {
+            if (_currentMessageBorder != null)
+            {
+                var mainGrid = ResultsDataGrid.Parent as Grid;
+                if (mainGrid != null && mainGrid.Children.Contains(_currentMessageBorder))
+                {
+                    mainGrid.Children.Remove(_currentMessageBorder);
+                }
+                _currentMessageBorder = null;
+            }
+        }
+
+
+
+        private void ShowNoResultsMessage()
+        {
+            RemoveCurrentMessage();
+            ResultsDataGrid.Visibility = Visibility.Collapsed;
+
+            var noResultsText = new TextBlock
+            {
+                Text = "Ничего не найдено\nПопробуйте изменить условия поиска",
+                FontSize = 18,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Foreground = Brushes.Gray
+            };
+
+            // СОХРАНЯЕМ ссылку на Border в поле!
+            _currentMessageBorder = new Border
+            {
+                Child = noResultsText,
+                Background = Brushes.White,
+                BorderBrush = Brushes.LightGray,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Margin = new Thickness(20)
+            };
+
+            var mainGrid = ResultsDataGrid.Parent as Grid;
+            if (mainGrid != null)
+            {
+                Grid.SetRow(_currentMessageBorder, 2);
+                Grid.SetColumnSpan(_currentMessageBorder, 1);
+                mainGrid.Children.Add(_currentMessageBorder);
+            }
+        }
+
+        private void Update()
+        {
+            try
+            {
+                var context = Data.DiplomMurEntities.GetContext();
+
+                var query = context.Product
+                    .Where(p => p.ProductIsActive == true)
+                    .Include(p => p.Category)
+                    .Include(p => p.Category.Material)
+                    //.OrderBy(p=>p.ProductID)
+                    .AsQueryable();
+
+                string selectedMaterial = MaterialComboBox.SelectedItem?.ToString();
+                if (selectedMaterial != "Все материалы" && !string.IsNullOrEmpty(selectedMaterial))
+                {
+                    query = query.Where(p => p.Category.Material.MaterialName == selectedMaterial);
+                }
+                string selectedCategory = TypeComboBox.SelectedItem?.ToString();
+                if (selectedCategory != "Все типы" && !string.IsNullOrEmpty(selectedCategory))
+                {
+                    query = query.Where(p => p.Category.CategoryName == selectedCategory);
+                }
+
+                if (!string.IsNullOrWhiteSpace(SearchTextBox.Text))
+                {
+                    string searchText = SearchTextBox.Text.ToLower();
+                    query = query.Where(p => p.ProductName.ToLower().Contains(searchText) ||
+                    p.ProductStandartNumber.ToLower().Contains(searchText) ||
+                    p.Category.Material.MaterialName.ToLower().Contains(searchText) ||
+                    p.Category.CategoryName.ToLower().Contains(searchText));
+                }
+
+                var products = query
+                    .Select(p => new ProductItem
+                    {
+                        ProductID = p.ProductID, // ДОБАВИТЬ ЭТУ СТРОКУ
+                        Name = p.ProductName,
+                        GostNumber = p.ProductStandartNumber,
+                        Category = p.Category.CategoryName,
+                        Material = p.Category.Material.MaterialName
+                    })
+                    .ToList();
+
+                _filteredProducts = products;
+
+                if (products.Count == 0)
+                {
+                    ShowNoResultsMessage();
+                    ResultsCountText.Text = "Найдено: 0 профилей";
+                }
+                else
+                {
+                    ShowResultsInTable(products);
+                    ResultsCountText.Text = $"Найдено: {products.Count} профилей";
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка поиска: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ShowResultsInTable(List<ProductItem> products)
+        {
+            RemoveCurrentMessage();
+            ResultsDataGrid.Visibility = Visibility.Visible;
+            ResultsDataGrid.Columns.Clear();
+
+            var visibleColumns = _columnSettings.Where(c => c.IsVisible).ToList();
+
+            for (int i = 0; i < visibleColumns.Count; i++)
+            {
+                var setting = visibleColumns[i];
+                var column = new DataGridTextColumn
+                {
+                    Header = setting.DisplayName,
+                    Binding = new System.Windows.Data.Binding(setting.FieldName),
+                };
+
+                // Если это последняя колонка - делаем занимает всё свободное место
+                if (i == visibleColumns.Count - 1)
+                {
+                    column.Width = new DataGridLength(1, DataGridLengthUnitType.Star);
+                }
+                else
+                {
+                    column.Width = setting.Width;
+                }
+
+                ResultsDataGrid.Columns.Add(column);
+            }
+
+            ResultsDataGrid.ItemsSource = products;
+        }
+
+        private void OpenFilters_Click(object sender, RoutedEventArgs e)
+        {
+            //var filtersWindow = new FiltersWindow();
+            //filtersWindow.CurrentColumns = _columnSettings;
+            //filtersWindow.CurrentFilters = _currentFilters;
+            //filtersWindow.Owner = this;
+
+            //if (filtersWindow.ShowDialog() == true)
+            //{
+            //    _columnSettings = filtersWindow.CurrentColumns;
+            //    _currentFilters = filtersWindow.CurrentFilters;
+
+            //    if (_filteredProducts.Any())
+            //    {
+            //        ShowResultsInTable(_filteredProducts);
+            //    }
+            //}
+        }
+        
+
+        private void OpenFavorites_Click(object sender, RoutedEventArgs e)
+        {
+            if (App.CurrentUserID <= 0)
+            {
+                MessageBox.Show("Войдите в систему для просмотра избранного", "Информация");
+                return;
+            }
+
+            var favoritesWindow = new FavoriteWindow(App.CurrentUserID);
+            favoritesWindow.Owner = this;
+            favoritesWindow.ShowDialog();
+        }
+
+        private void Result_DoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var selectedProduct = ResultsDataGrid.SelectedItem as ProductItem;
+            if (selectedProduct != null)
+            {
+                try
+                {
+                    // Запись в историю просмотров
+                    if (App.CurrentUserID > 0)
+                    {
+                        using (var context = new Data.DiplomMurEntities())
+                        {
+                            var history = new Data.VisitHistory
+                            {
+                                VisitUserID = App.CurrentUserID,
+                                VisitProductID = selectedProduct.ProductID,
+                                VisitCreate = DateTime.Now,
+                                VisitSearchQuery = SearchTextBox.Text
+                            };
+                            context.VisitHistory.Add(history);
+                            context.SaveChanges();
+                        }
+                    }
+
+                    var detailsWindow = new GostDetailsWindow(selectedProduct.GostNumber, App.CurrentUserID);
+                    detailsWindow.Owner = this;
+                    detailsWindow.ShowDialog();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при загрузке ГОСТа: {ex.Message}", "Ошибка");
+                }
+            }
+        }
+
+
+
+          
+        
+
+       
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            Update();
+        }
+
+        private void SearchTextBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if(e.Key == Key.Enter)
+            {
+                Update();
+            }
+        }
+
+
+        private void MaterialComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            Update();
+        }
+
+        private void TypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            Update();
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            Update();
+        }
+
+        private void ViewHistory_Click(object sender, RoutedEventArgs e)
+        {
+            var historyWindow = new ViewHistoryWindow();
+            historyWindow.Show();
+        }
+
+        private void CalculatorWindow_Click(object sender, RoutedEventArgs e)
+        {
+            var calculatorwindow = new CalculatorWindow();
+            calculatorwindow.Show();
+           
+        }
+
+
+    }
+}

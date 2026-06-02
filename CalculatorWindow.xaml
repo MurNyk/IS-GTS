@@ -1,0 +1,136 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+
+namespace IS_GTS.Windows
+{
+    /// <summary>
+    /// Логика взаимодействия для AuthWindow.xaml
+    /// </summary>
+    public partial class AuthWindow : Window
+    {
+        public static string Password;
+        public AuthWindow()
+        {
+            InitializeComponent();
+        }
+        private Data.User _currentUser;
+
+        private void AuthButton_Click(object sender, RoutedEventArgs e)
+        {
+            StringBuilder errors = new StringBuilder();
+            if(string.IsNullOrEmpty(LoginTextBox.Text))
+            {
+                errors.AppendLine("Введите логин");
+            }
+            if ((bool)VisiblyPassword.IsChecked)
+            {
+                if (string.IsNullOrEmpty(ParolTextBox.Text))
+                {
+                    errors.AppendLine("Введите пароль");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(ParolBox.Password))
+                {
+                    errors.AppendLine("Введите пароль");
+                }         
+            }
+
+            if(errors.Length>0)
+            {
+                MessageBox.Show(errors.ToString(), "Errors", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            if((bool)VisiblyPassword.IsChecked)
+            {
+                Password = ParolTextBox.Text;
+            }
+            else
+            {
+                Password = ParolBox.Password;
+            }
+
+            var SearchRole = Data.DiplomMurEntities.GetContext().User.Where(d => d.UserLogin == LoginTextBox.Text && d.UserPassword == Password).FirstOrDefault();
+            if(SearchRole!=null)
+            {
+                // ⭐ ПРОВЕРКА НА БЛОКИРОВКУ ⭐
+                if (SearchRole.UserIsBlocked == true)
+                {
+                    MessageBox.Show("Ваш аккаунт заблокирован!\nОбратитесь к администратору системы.",
+                        "Доступ запрещен", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                _currentUser = SearchRole;
+
+                // Сохраняем в статическом классе (для избранного)
+                App.CurrentUserID = SearchRole.UserID;
+                App.CurrentUserName = $"{SearchRole.UserLastName} {SearchRole.UserFirstName}";
+
+                App.CurrentUserLogin = SearchRole.UserLogin;
+                App.CurrentUserRole = SearchRole.UserRoleID;
+
+
+                StringBuilder inf = new StringBuilder();
+                inf.AppendLine($"Вы вошли как {SearchRole.Role.RoleName}");
+                switch (SearchRole.Role.RoleID)
+                {
+
+                    case 1:
+                        var adminWindow = new AdminWindow(SearchRole.UserID);
+                        adminWindow.Show();
+                        this.Close();
+                        break;
+
+                    case 2:
+                        var mainWindow = new SearchWindow(SearchRole.UserID, SearchRole.Role.RoleID);
+                        mainWindow.Show();
+                        this.Close();
+                        break;
+                    case 3:
+                        var chiefWindow = new ChiefEngineerWindow(SearchRole.UserID);
+                        chiefWindow.Show();
+                        this.Close();
+                        break;
+                        
+                    default:
+                        MessageBox.Show("У вас нет прав для доступа", "Ошибка");
+                        return;
+                }
+                _currentUser = SearchRole;
+                MessageBox.Show(inf.ToString(), "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
+            else
+            {
+                MessageBox.Show("Такого пользователя нет. Введите другие данные!", "Error");
+            }
+        }
+
+        private void VisiblyPassword_Checked(object sender, RoutedEventArgs e)
+        {
+            ParolTextBox.Text = ParolBox.Password;
+            ParolTextBox.Visibility = Visibility.Visible;
+            ParolBox.Visibility = Visibility.Collapsed;
+        }
+
+        private void VisiblyPassword_Unchecked(object sender, RoutedEventArgs e)
+        {
+            ParolTextBox.Text = ParolBox.Password;
+            ParolTextBox.Visibility = Visibility.Collapsed;
+            ParolBox.Visibility = Visibility.Visible;
+        }
+    }
+}

@@ -1,0 +1,116 @@
+﻿using System;
+using System.Linq;
+using System.Windows;
+using System.Data.Entity;
+
+namespace IS_GTS.Windows
+{
+    public partial class UserProfileWindow : Window
+    {
+        private int _userId;
+
+        public UserProfileWindow(int userId)
+        {
+            InitializeComponent();
+            _userId = userId;
+            LoadUserData();
+        }
+
+        private void LoadUserData()
+        {
+            using (var db = new Data.DiplomMurEntities())
+            {
+                var user = db.User
+                    .Include(u => u.Role)
+                    .FirstOrDefault(u => u.UserID == _userId);
+
+                if (user != null)
+                {
+                    // Только для просмотра
+                    LastNameText.Text = user.UserLastName;
+                    FirstNameText.Text = user.UserFirstName;
+                    PatronymicText.Text = string.IsNullOrWhiteSpace(user.UserPatronymic) ? "—" : user.UserPatronymic;
+                    BirthDateText.Text = user.UserDateBirth?.ToString("dd.MM.yyyy") ?? "—";
+                    RoleText.Text = user.Role?.RoleName ?? "Не указана";
+
+                    // Можно редактировать
+                    LoginTextBox.Text = user.UserLogin;
+                    PhoneTextBox.Text = user.UserPhone ?? "";
+                    EmailTextBox.Text = user.UserEmail ?? "";
+                }
+            }
+        }
+
+        private void SaveButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Проверки
+            if (string.IsNullOrWhiteSpace(LoginTextBox.Text))
+            {
+                ShowMessage("Логин не может быть пустым!", false);
+                return;
+            }
+
+            using (var db = new Data.DiplomMurEntities())
+            {
+                var user = db.User.FirstOrDefault(u => u.UserID == _userId);
+
+                if (user != null)
+                {
+                    // Проверяем, не занят ли логин другим пользователем
+                    var existingUser = db.User.FirstOrDefault(u => u.UserLogin == LoginTextBox.Text && u.UserID != _userId);
+                    if (existingUser != null)
+                    {
+                        ShowMessage("Этот логин уже занят!", false);
+                        return;
+                    }
+
+                    // Сохраняем изменения
+                    user.UserLogin = LoginTextBox.Text;
+                    user.UserPhone = string.IsNullOrWhiteSpace(PhoneTextBox.Text) ? null : PhoneTextBox.Text;
+                    user.UserEmail = string.IsNullOrWhiteSpace(EmailTextBox.Text) ? null : EmailTextBox.Text;
+
+                    db.SaveChanges();
+
+                    ShowMessage("Данные успешно сохранены!", true);
+
+                    // Обновляем глобальные данные если изменился логин
+                    if (App.CurrentUserLogin != LoginTextBox.Text)
+                    {
+                        App.CurrentUserLogin = LoginTextBox.Text;
+                    }
+                }
+            }
+        }
+
+        private void ChangePasswordButton_Click(object sender, RoutedEventArgs e)
+        {
+            var changePasswordWindow = new ChangePasswordWindow(_userId);
+            changePasswordWindow.Owner = this;
+            changePasswordWindow.ShowDialog();
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        private void ShowMessage(string message, bool isSuccess)
+        {
+            MessageText.Text = message;
+            MessageText.Foreground = isSuccess ?
+                new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Green) :
+                new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red);
+            MessageText.Visibility = Visibility.Visible;
+
+            // Скрываем через 3 секунды
+            var timer = new System.Windows.Threading.DispatcherTimer();
+            timer.Interval = TimeSpan.FromSeconds(3);
+            timer.Tick += (s, e) =>
+            {
+                MessageText.Visibility = Visibility.Collapsed;
+                timer.Stop();
+            };
+            timer.Start();
+        }
+    }
+}

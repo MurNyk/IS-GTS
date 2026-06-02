@@ -1,0 +1,233 @@
+﻿using Microsoft.Win32;
+using OfficeOpenXml;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+
+namespace IS_GTS.Windows
+{
+    public partial class ComparisonResultWindow : Window
+    {
+        private List<ComparisonRow> _comparisonRows;
+        private List<string> _profileNames;
+
+        public class ComparisonRow
+        {
+            public string ParameterName { get; set; }
+            public List<ComparisonCell> Cells { get; set; } = new List<ComparisonCell>();
+        }
+
+        public class ComparisonCell
+        {
+            public string Value { get; set; }
+            public bool IsCellDifferent { get; set; }
+        }
+
+        public ComparisonResultWindow(List<ComparisonWindow.ComparisonItem> selectedItems)
+        {
+            InitializeComponent();
+            BuildComparisonTable(selectedItems);
+        }
+
+        private void BuildComparisonTable(List<ComparisonWindow.ComparisonItem> selectedItems)
+        {
+            if (selectedItems == null || selectedItems.Count < 2)
+            {
+                MessageBox.Show("Недостаточно профилей для сравнения", "Ошибка");
+                Close();
+                return;
+            }
+
+            _profileNames = selectedItems.Select(i => i.ProductName).ToList();
+            InfoText.Text = $"Сравниваемые профили: {string.Join("  |  ", _profileNames)}";
+
+            // 1. Собираем ВСЕ характеристики из всех выбранных профилей
+            var allParameters = new HashSet<string>();
+            foreach (var item in selectedItems)
+            {
+                foreach (var key in item.Characteristics.Keys)
+                {
+                    allParameters.Add(key);
+                }
+            }
+
+            // 2. Формируем строки таблицы
+            _comparisonRows = new List<ComparisonRow>();
+            foreach (var param in allParameters.OrderBy(p => p))
+            {
+                var row = new ComparisonRow
+                {
+                    ParameterName = param,
+                    Cells = new List<ComparisonCell>()
+                };
+
+                // Собираем значения для этого параметра по всем профилям
+                var values = new List<string>();
+                foreach (var item in selectedItems)
+                {
+                    string value = item.Characteristics.ContainsKey(param)
+                        ? item.Characteristics[param]
+                        : "—";
+                    values.Add(value);
+                }
+
+                // Анализируем, какие ячейки нужно подсветить
+                var validValues = values.Where(v => v != "—").ToList();
+
+                if (!validValues.Any())
+                {
+                    // Нет ни одного значения — ничего не подсвечиваем
+                    foreach (var val in values)
+                    {
+                        row.Cells.Add(new ComparisonCell { Value = val, IsCellDifferent = false });
+                    }
+                }
+                else if (validValues.Distinct().Count() == validValues.Count && validValues.Count > 1)
+                {
+                    // Все значения разные — подсвечиваем все непустые
+                    foreach (var val in values)
+                    {
+                        row.Cells.Add(new ComparisonCell { Value = val, IsCellDifferent = val != "—" });
+                    }
+                }
+                else
+                {
+                    // Находим наиболее часто встречающееся значение
+                    var mostCommonValue = validValues
+                        .GroupBy(v => v)
+                        .OrderByDescending(g => g.Count())
+                        .First().Key;
+
+                    foreach (var val in values)
+                    {
+                        bool isDifferent = val != "—" && val != mostCommonValue;
+                        row.Cells.Add(new ComparisonCell { Value = val, IsCellDifferent = isDifferent });
+                    }
+                }
+
+                _comparisonRows.Add(row);
+            }
+
+            // 3. Настраиваем колонки DataGrid
+            ComparisonDataGrid.Columns.Clear();
+
+            // Первая колонка — параметр
+            ComparisonDataGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Параметр",
+                Binding = new System.Windows.Data.Binding("ParameterName"),
+                Width = new DataGridLength(150, DataGridLengthUnitType.Pixel),
+                IsReadOnly = true
+            });
+
+            // Колонки для каждого профиля
+            for (int i = 0; i < selectedItems.Count; i++)
+            {
+                int index = i;
+                var column = new DataGridTextColumn
+                {
+                    Header = _profileNames[i],
+                    Binding = new System.Windows.Data.Binding($"Cells[{index}].Value"),
+                    Width = new DataGridLength(150, DataGridLengthUnitType.Pixel),
+                    IsReadOnly = true
+                };
+
+                // Стиль для подсветки отличающихся ячеек
+                var style = new Style(typeof(DataGridCell));
+                var trigger = new DataTrigger
+                {
+                    Binding = new System.Windows.Data.Binding($"Cells[{index}].IsCellDifferent"),
+                    Value = true
+                };
+                trigger.Setters.Add(new Setter(DataGridCell.BackgroundProperty, new SolidColorBrush(Colors.LightYellow)));
+                trigger.Setters.Add(new Setter(DataGridCell.FontWeightProperty, FontWeights.Bold));
+                style.Triggers.Add(trigger);
+                column.CellStyle = style;
+
+                ComparisonDataGrid.Columns.Add(column);
+            }
+
+            ComparisonDataGrid.ItemsSource = _comparisonRows;
+
+            // 4. Настраиваем ширину окна
+            int profileCount = selectedItems.Count;
+            double windowWidth = 150 + (profileCount * 150) + 60;
+            if (windowWidth < 550) windowWidth = 550;
+            if (windowWidth > 1200) windowWidth = 1200;
+            this.Width = windowWidth;
+            this.SizeToContent = SizeToContent.Manual;
+        }
+
+        private void ExportToExcel_Click(object sender, RoutedEventArgs e)
+        {
+            if (_comparisonRows == null || !_comparisonRows.Any())
+            {
+                MessageBox.Show("Нет данных для экспорта", "Внимание");
+                return;
+            }
+
+            try
+            {
+                using (var package = new ExcelPackage())
+                {
+                    var worksheet = package.Workbook.Worksheets.Add("Сравнение профилей");
+
+                    // Заголовок
+                    worksheet.Cells[1, 1].Value = "Результат сравнения профилей";
+                    worksheet.Cells[1, 1].Style.Font.Bold = true;
+                    worksheet.Cells[1, 1].Style.Font.Size = 14;
+                    worksheet.Cells[2, 1].Value = $"Дата формирования: {DateTime.Now:dd.MM.yyyy HH:mm}";
+                    worksheet.Cells[3, 1].Value = InfoText.Text;
+
+                    // Заголовки колонок
+                    var headers = new List<string> { "Параметр" };
+                    headers.AddRange(_profileNames);
+
+                    for (int i = 0; i < headers.Count; i++)
+                    {
+                        worksheet.Cells[5, i + 1].Value = headers[i];
+                        worksheet.Cells[5, i + 1].Style.Font.Bold = true;
+                    }
+
+                    // Данные
+                    int row = 6;
+                    foreach (var comparisonRow in _comparisonRows)
+                    {
+                        worksheet.Cells[row, 1].Value = comparisonRow.ParameterName;
+                        for (int i = 0; i < comparisonRow.Cells.Count; i++)
+                        {
+                            worksheet.Cells[row, i + 2].Value = comparisonRow.Cells[i].Value;
+                        }
+                        row++;
+                    }
+
+                    worksheet.Cells.AutoFitColumns();
+
+                    var saveDialog = new SaveFileDialog
+                    {
+                        Filter = "Excel файлы|*.xlsx",
+                        FileName = $"Сравнение_профилей_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                    };
+
+                    if (saveDialog.ShowDialog() == true)
+                    {
+                        System.IO.File.WriteAllBytes(saveDialog.FileName, package.GetAsByteArray());
+                        MessageBox.Show("Экспорт выполнен успешно!", "Успех");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка экспорта: {ex.Message}", "Ошибка");
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+    }
+}

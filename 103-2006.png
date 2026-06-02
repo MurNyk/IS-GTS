@@ -1,0 +1,145 @@
+﻿using IS_GTS.ViewModels;
+using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace IS_GTS.Windows
+{
+    public partial class ViewHistoryWindow : Window
+    {
+        private List<HistoryItem> _filteredHistory = new List<HistoryItem>();
+        private int _currentUserId;
+
+        public ViewHistoryWindow()
+        {
+            InitializeComponent();
+            DataContext = this;
+            _currentUserId = App.CurrentUserID;
+
+            if (_currentUserId <= 0)
+            {
+                MessageBox.Show("Войдите в систему для просмотра истории", "История");
+                Close();
+                return;
+            }
+            Init();
+        }
+
+        private void Init()
+        {
+            try
+            {
+                LoadHistory();
+                //HistoryDatePicker.SelectedDate = DateTime.Today;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка инициализации: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void LoadHistory()
+        {
+            try
+            {
+                var context = Data.DiplomMurEntities.GetContext();
+
+                var query = context.VisitHistory
+                    .Where(v => v.VisitUserID == _currentUserId)
+                    .Include(v => v.Product)
+                    .Include(v => v.Product.Category)
+                    .Include(v => v.Product.Category.Material)
+                    .OrderByDescending(v => v.VisitCreate)
+                    .AsQueryable();
+
+                if (HistoryDatePicker.SelectedDate.HasValue)
+                {
+                    var selectedDate = HistoryDatePicker.SelectedDate.Value;
+                    query = query.Where(v => v.VisitCreate.HasValue &&
+                                           DbFunctions.TruncateTime(v.VisitCreate.Value) == selectedDate.Date);
+                }
+
+                if (!string.IsNullOrWhiteSpace(SearchTextBox.Text))
+                {
+                    string searchText = SearchTextBox.Text.ToLower();
+                    query = query.Where(v =>
+                        v.Product.ProductName.ToLower().Contains(searchText) ||
+                        v.Product.ProductStandartNumber.ToLower().Contains(searchText) ||
+                        v.Product.Category.CategoryName.ToLower().Contains(searchText) ||
+                        (v.VisitSearchQuery != null && v.VisitSearchQuery.ToLower().Contains(searchText)));
+                }
+
+                var history = query
+                    .Select(v => new HistoryItem
+                    {
+                        VisitID = v.VisitID,
+                        VisitDateTime = v.VisitCreate ?? DateTime.MinValue,
+                        GostNumber = v.Product.ProductStandartNumber,
+                        ProductName = v.Product.ProductName,
+                        CategoryName = v.Product.Category.CategoryName,
+                        MaterialName = v.Product.Category.Material.MaterialName,
+                        SearchQuery = v.VisitSearchQuery
+                    })
+                    .ToList();
+
+                _filteredHistory = history;
+                HistoryDataGrid.ItemsSource = _filteredHistory;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки истории: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            LoadHistory();
+        }
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            LoadHistory();
+        }
+
+        private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show("Вы уверены, что хотите очистить всю историю просмотров?", "Удаление", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    var context = Data.DiplomMurEntities.GetContext();
+
+                    var userHistory = context.VisitHistory
+                        .Where(v => v.VisitUserID == _currentUserId)
+                        .ToList();
+
+                    context.VisitHistory.RemoveRange(userHistory);
+                    context.SaveChanges();
+
+                    MessageBox.Show("История очищена", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                    LoadHistory();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка при очистке истории: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void HistoryDatePicker_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
+        {
+            LoadHistory();
+        }
+    }
+}

@@ -1,0 +1,336 @@
+﻿using IS_GTS.Data;
+using IS_GTS.ViewModels;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace IS_GTS.Windows
+{
+    public partial class FavoriteWindow : Window
+    {
+        private int _currentUserId;
+        private List<FavoriteItem> _allFavorites = new List<FavoriteItem>();
+        private ObservableCollection<FavoriteItem> _displayedFavorites;
+
+        public FavoriteWindow(int userId)
+        {
+            InitializeComponent();
+            _currentUserId = userId;
+            _displayedFavorites = new ObservableCollection<FavoriteItem>();
+            FavoritesDataGrid.ItemsSource = _displayedFavorites;
+
+            LoadFavoritesAsync();
+        }
+
+        private async void LoadFavoritesAsync()
+        {
+            try
+            {
+                FavoritesDataGrid.IsEnabled = false;
+                this.Cursor = System.Windows.Input.Cursors.Wait;
+
+                var result = await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var context = new Data.DiplomMurEntities())
+                    {
+                        context.Configuration.LazyLoadingEnabled = false;
+
+                        var favorites = context.Favorite
+                            .Where(f => f.FavoriteUserID == _currentUserId)
+                            .Select(f => new
+                            {
+                                f.FavoriteID,
+                                f.FavoriteProductSizeID,
+                                f.FavoriteFolderName,
+                                f.FavoriteCreate,
+                                SizeName = f.Size != null ? f.Size.SizeName : "Неизвестный",
+                                GostNumber = f.Size.Product != null ? f.Size.Product.ProductStandartNumber : "Нет ГОСТ",
+                                CategoryName = f.Size.Product.Category != null ? f.Size.Product.Category.CategoryName : "Без категории",
+                                MaterialName = f.Size.Product.Category.Material != null ? f.Size.Product.Category.Material.MaterialName : "Без материала"
+                            })
+                            .ToList();
+
+                        var favoritesList = favorites.Select(f => new FavoriteItem
+                        {
+                            FavoriteID = f.FavoriteID,
+                            SizeID = f.FavoriteProductSizeID,
+                            ProfileName = f.SizeName,
+                            GostNumber = f.GostNumber,
+                            Category = f.CategoryName,
+                            Material = f.MaterialName,
+                            CurrentFolder = f.FavoriteFolderName,
+                            AddedDate = f.FavoriteCreate,
+                            AvailableFolders = new List<string>()
+                        }).OrderByDescending(f => f.AddedDate).ToList();
+
+                        var folders = favorites
+                            .Where(f => !string.IsNullOrEmpty(f.FavoriteFolderName))
+                            .Select(f => f.FavoriteFolderName)
+                            .Distinct()
+                            .OrderBy(f => f)
+                            .ToList();
+
+                        return new { Favorites = favoritesList, Folders = folders };
+                    }
+                });
+
+                _allFavorites = result.Favorites;
+
+                // Обновляем UI
+                RefreshUI(result.Favorites, result.Folders);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка");
+            }
+            finally
+            {
+                FavoritesDataGrid.IsEnabled = true;
+                this.Cursor = null;
+            }
+        }
+
+        private void RefreshUI(List<FavoriteItem> favorites, List<string> folders)
+        {
+            // Обновляем комбобоксы
+            var availableFolders = new List<string> { "[Без папки]" };
+            availableFolders.AddRange(folders);
+
+            foreach (var favorite in favorites)
+            {
+                favorite.AvailableFolders = new List<string>(availableFolders);
+            }
+
+            // Обновляем DataGrid
+            _displayedFavorites.Clear();
+            foreach (var item in favorites)
+            {
+                _displayedFavorites.Add(item);
+            }
+
+            // Обновляем список папок слева
+            var folderItems = folders.Select(f => new FolderItem
+            {
+                Name = f,
+                ItemCount = favorites.Count(fav => fav.CurrentFolder == f)
+            }).OrderBy(f => f.Name).ToList();
+
+            FoldersListBox.ItemsSource = folderItems;
+
+            CountText.Text = $"({favorites.Count} профилей)";
+            StatsText.Text = $"Всего: {favorites.Count} профилей\nПапок: {folders.Count}";
+        }
+
+        private async void CreateFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            string newFolderName = NewFolderTextBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(newFolderName))
+            {
+                MessageBox.Show("Введите название папки", "Ошибка");
+                return;
+            }
+
+            // Проверяем, существует ли уже такая папка
+            var currentFolders = FoldersListBox.ItemsSource as List<FolderItem>;
+            if (currentFolders != null && currentFolders.Any(f => f.Name == newFolderName))
+            {
+                MessageBox.Show("Папка с таким названием уже существует", "Ошибка");
+                return;
+            }
+
+            // СОХРАНЯЕМ ПАПКУ В БД? 
+            // Папка не сохраняется отдельно, она сохраняется когда пользователь назначает ее профилю
+            // Просто добавляем в локальный список
+            var updatedFolders = new List<FolderItem>();
+            if (currentFolders != null)
+            {
+                updatedFolders.AddRange(currentFolders);
+            }
+            updatedFolders.Add(new FolderItem { Name = newFolderName, ItemCount = 0 });
+            updatedFolders = updatedFolders.OrderBy(f => f.Name).ToList();
+            FoldersListBox.ItemsSource = updatedFolders;
+
+            // Обновляем комбобоксы у всех элементов
+            var availableFolders = new List<string> { "[Без папки]" };
+            availableFolders.AddRange(updatedFolders.Select(f => f.Name));
+
+            foreach (var favorite in _allFavorites)
+            {
+                favorite.AvailableFolders = new List<string>(availableFolders);
+            }
+
+            // Обновляем DataGrid
+            RefreshDataGrid();
+
+            NewFolderTextBox.Text = "";
+            MessageBox.Show($"Папка '{newFolderName}' создана", "Успех");
+        }
+
+        private void RefreshDataGrid()
+        {
+            _displayedFavorites.Clear();
+            foreach (var item in _allFavorites)
+            {
+                _displayedFavorites.Add(item);
+            }
+        }
+
+        private void FoldersListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (FoldersListBox.SelectedItem is FolderItem selectedFolder)
+            {
+                var filtered = _allFavorites.Where(f => f.CurrentFolder == selectedFolder.Name).ToList();
+
+                _displayedFavorites.Clear();
+                foreach (var item in filtered)
+                {
+                    _displayedFavorites.Add(item);
+                }
+                CountText.Text = $"({filtered.Count} профилей в папке '{selectedFolder.Name}')";
+            }
+        }
+
+        private void ShowAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            FoldersListBox.SelectedItem = null;
+            RefreshDataGrid();
+            CountText.Text = $"({_allFavorites.Count} профилей)";
+        }
+
+        private void OpenGostButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button?.Tag is string gostNumber)
+            {
+                // Получаем выбранный профиль
+                var selectedFavorite = button.DataContext as FavoriteItem;
+                int? selectedSizeId = selectedFavorite?.SizeID;
+
+                var detailsWindow = new GostDetailsWindow(gostNumber, _currentUserId, selectedSizeId);
+                detailsWindow.Owner = this;
+                detailsWindow.ShowDialog();
+            }
+        }
+
+        private async void RemoveButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button?.Tag is int favoriteId)
+            {
+                if (MessageBox.Show("Удалить профиль из избранного?", "Удаление", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                {
+                    await System.Threading.Tasks.Task.Run(() =>
+                    {
+                        using (var context = new Data.DiplomMurEntities())
+                        {
+                            var favorite = context.Favorite.Find(favoriteId);
+                            if (favorite != null)
+                            {
+                                context.Favorite.Remove(favorite);
+                                context.SaveChanges();
+                            }
+                        }
+                    });
+
+                    LoadFavoritesAsync();
+                }
+            }
+        }
+
+        private async void FolderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var comboBox = sender as ComboBox;
+            if (comboBox?.DataContext is FavoriteItem item && comboBox.SelectedItem is string selectedFolder)
+            {
+                string newFolder = selectedFolder == "[Без папки]" ? null : selectedFolder;
+
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (var context = new Data.DiplomMurEntities())
+                    {
+                        var favorite = context.Favorite.Find(item.FavoriteID);
+                        if (favorite != null)
+                        {
+                            favorite.FavoriteFolderName = newFolder;
+                            context.SaveChanges();
+                        }
+                    }
+                });
+
+                item.CurrentFolder = newFolder;
+
+                // Обновляем счетчики папок
+                var folders = FoldersListBox.ItemsSource as List<FolderItem>;
+                if (folders != null)
+                {
+                    var updatedFolders = folders.Select(f => new FolderItem
+                    {
+                        Name = f.Name,
+                        ItemCount = _allFavorites.Count(fav => fav.CurrentFolder == f.Name)
+                    }).OrderBy(f => f.Name).ToList();
+                    FoldersListBox.ItemsSource = updatedFolders;
+                }
+
+                StatsText.Text = $"Всего: {_allFavorites.Count} профилей\nПапок: {(FoldersListBox.ItemsSource as List<FolderItem>)?.Count ?? 0}";
+            }
+        }
+
+        private void DeleteFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button?.Tag is string folderName)
+            {
+                // Проверяем, есть ли профили в этой папке
+                int count = _allFavorites.Count(f => f.CurrentFolder == folderName);
+                string message = count > 0
+                    ? $"Папка '{folderName}' содержит {count} профилей.\nУдалить папку? Профили останутся без папки."
+                    : $"Удалить папку '{folderName}'?";
+
+                if (MessageBox.Show(message, "Подтверждение", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                {
+                    // Если есть профили в папке, удаляем у них ссылку на папку
+                    if (count > 0)
+                    {
+                        foreach (var favorite in _allFavorites.Where(f => f.CurrentFolder == folderName))
+                        {
+                            favorite.CurrentFolder = null;
+
+                            // Обновляем в БД
+                            using (var context = new Data.DiplomMurEntities())
+                            {
+                                var dbFavorite = context.Favorite.Find(favorite.FavoriteID);
+                                if (dbFavorite != null)
+                                {
+                                    dbFavorite.FavoriteFolderName = null;
+                                    context.SaveChanges();
+                                }
+                            }
+                        }
+                    }
+
+                    // Удаляем папку из списка
+                    var currentFolders = FoldersListBox.ItemsSource as List<FolderItem>;
+                    var updatedFolders = currentFolders.Where(f => f.Name != folderName).ToList();
+                    FoldersListBox.ItemsSource = updatedFolders;
+
+                    // Обновляем комбобоксы
+                    var availableFolders = new List<string> { "[Без папки]" };
+                    availableFolders.AddRange(updatedFolders.Select(f => f.Name));
+
+                    foreach (var favorite in _allFavorites)
+                    {
+                        favorite.AvailableFolders = new List<string>(availableFolders);
+                    }
+
+                    RefreshDataGrid();
+                    ShowAllButton_Click(null, null);
+                    StatsText.Text = $"Всего: {_allFavorites.Count} профилей\nПапок: {updatedFolders.Count}";
+                    MessageBox.Show($"Папка '{folderName}' удалена", "Успех");
+                }
+            }
+        }
+    }
+}

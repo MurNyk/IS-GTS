@@ -1,0 +1,160 @@
+﻿using IS_GTS.Data;
+using System;
+using System.Collections.Generic;
+using System.Data.Entity;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+
+namespace IS_GTS.Windows
+{
+    public partial class AdminWindow : Window
+    {
+        private List<UserDisplayModel> _displayUsers;
+        private int _currentUserId;
+
+        public AdminWindow(int currentUserId)
+        {
+            InitializeComponent();
+            _currentUserId = currentUserId;
+            LoadUsers();
+        }
+
+        public class UserDisplayModel
+        {
+            public int UserID { get; set; }
+            public string FullName { get; set; }
+            public string FullNameWithMark { get; set; }
+            public string UserLogin { get; set; }
+            public string RoleName { get; set; }
+            public string LastVisit { get; set; }
+            public string UserStatus { get; set; }
+            public bool IsCurrentUser { get; set; }
+            public string UserLastName { get; set; }
+            public string UserFirstName { get; set; }
+            public string UserPatronymic { get; set; }
+        }
+
+        public void LoadUsers()
+        {
+            using (var db = new DiplomMurEntities())
+            {
+                var users = db.User
+                    .Include(u => u.Role)
+                    .Include(u => u.VisitHistory)
+                    .ToList();
+
+                _displayUsers = users.Select(u => new UserDisplayModel
+                {
+                    UserID = u.UserID,
+                    FullName = $"{u.UserLastName} {u.UserFirstName}" +
+                              (string.IsNullOrWhiteSpace(u.UserPatronymic) ? "" : $" {u.UserPatronymic}"),
+                    UserLogin = u.UserLogin,
+                    RoleName = u.Role?.RoleName ?? "Не указана",
+                    LastVisit = GetLastVisitDate(u.VisitHistory),
+                    UserStatus = (u.UserIsBlocked == true) ? "Заблокирован" : "Активен",
+                    IsCurrentUser = (u.UserID == _currentUserId),
+                    UserLastName = u.UserLastName,
+                    UserFirstName = u.UserFirstName,
+                    UserPatronymic = u.UserPatronymic
+                }).ToList();
+
+                foreach (var user in _displayUsers)
+                {
+                    user.FullNameWithMark = user.IsCurrentUser ? $"{user.FullName} (Вы)" : user.FullName;
+                }
+
+                UsersDataGrid.ItemsSource = _displayUsers;
+                UpdateCounters();
+            }
+        }
+
+        private string GetLastVisitDate(ICollection<VisitHistory> visitHistory)
+        {
+            if (visitHistory == null || !visitHistory.Any())
+                return "Никогда";
+
+            var lastVisit = visitHistory
+                .Where(v => v.VisitCreate.HasValue)
+                .OrderByDescending(v => v.VisitCreate)
+                .FirstOrDefault();
+
+            return lastVisit?.VisitCreate?.ToString("dd.MM.yyyy HH:mm") ?? "Никогда";
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            string searchText = SearchTextBox.Text.ToLower();
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                UsersDataGrid.ItemsSource = _displayUsers;
+            }
+            else
+            {
+                var filtered = _displayUsers.Where(u =>
+                    (u.FullNameWithMark != null && u.FullNameWithMark.ToLower().Contains(searchText)) ||
+                    (u.UserLastName != null && u.UserLastName.ToLower().Contains(searchText)) ||
+                    (u.UserFirstName != null && u.UserFirstName.ToLower().Contains(searchText)) ||
+                    (u.UserPatronymic != null && u.UserPatronymic.ToLower().Contains(searchText)) ||
+                    (u.UserLogin != null && u.UserLogin.ToLower().Contains(searchText)) ||
+                    (u.RoleName != null && u.RoleName.ToLower().Contains(searchText))
+                ).ToList();
+
+                UsersDataGrid.ItemsSource = filtered;
+            }
+
+            UpdateCounters();
+        }
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            SearchTextBox_TextChanged(sender, null);
+        }
+
+        private void UpdateCounters()
+        {
+            var currentList = UsersDataGrid.ItemsSource as List<UserDisplayModel>;
+            if (currentList != null)
+            {
+                UsersCountText.Text = currentList.Count.ToString();
+                ActiveCountText.Text = currentList.Count(u => u.UserStatus == "Активен").ToString();
+                BlockCountText.Text = currentList.Count(u => u.UserStatus == "Заблокирован").ToString();
+            }
+        }
+
+        private void AddButton_Click(object sender, RoutedEventArgs e)
+        {
+            var addUserWindow = new AddUserWindow();
+            addUserWindow.ShowDialog();
+            LoadUsers();
+        }
+
+        private void BackButton_Click(object sender, RoutedEventArgs e)
+        {
+            var authWindow = new AuthWindow();
+            this.Close();
+            authWindow.Show();
+        }
+
+        private void UsersDataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var selectedUser = UsersDataGrid.SelectedItem as UserDisplayModel;
+
+            if (selectedUser != null)
+            {
+                var userDetailsWindow = new UserDetailsWindow(selectedUser.UserID, _currentUserId);
+                userDetailsWindow.Owner = this;
+
+                // Подписываемся на событие закрытия окна
+                userDetailsWindow.Closed += (s, args) =>
+                {
+                    LoadUsers(); // Обновляем после закрытия
+                };
+
+                userDetailsWindow.ShowDialog();
+            }
+        }
+    }
+}
