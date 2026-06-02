@@ -1,0 +1,776 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="3.0" xmlns:edmx="http://schemas.microsoft.com/ado/2009/11/edmx">
+  <!-- EF Runtime content -->
+  <edmx:Runtime>
+    <!-- SSDL content -->
+    <edmx:StorageModels>
+    <Schema Namespace="Хранилище DiplomMurModel" Provider="System.Data.SqlClient" ProviderManifestToken="2012" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
+        <EntityType Name="Category">
+          <Key>
+            <PropertyRef Name="CategoryID" />
+          </Key>
+          <Property Name="CategoryID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="CategoryMaterialID" Type="int" Nullable="false" />
+          <Property Name="CategoryName" Type="nvarchar" MaxLength="100" Nullable="false" />
+          <Property Name="CategoryParentID" Type="int" />
+          <Property Name="CategoryDescription" Type="nvarchar" MaxLength="250" />
+          <Property Name="CategorySortOrder" Type="int" />
+        </EntityType>
+        <EntityType Name="Characteristic">
+          <Key>
+            <PropertyRef Name="CharactID" />
+          </Key>
+          <Property Name="CharactID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="CharactName" Type="nvarchar" MaxLength="100" Nullable="false" />
+          <Property Name="CharactDataType" Type="nvarchar" MaxLength="20" Nullable="false" />
+          <Property Name="CharactDefaultUnit" Type="nvarchar" MaxLength="20" />
+          <Property Name="CharactDescription" Type="nvarchar" MaxLength="250" />
+        </EntityType>
+        <EntityType Name="CharacteristicValue">
+          <Key>
+            <PropertyRef Name="ValueID" />
+          </Key>
+          <Property Name="ValueID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ValueSizeID" Type="int" Nullable="false" />
+          <Property Name="ValueCharactID" Type="int" Nullable="false" />
+          <Property Name="ValuePrecisionType" Type="nvarchar" MaxLength="30" />
+          <Property Name="ValueToleranceDirection" Type="nvarchar" MaxLength="5" />
+          <Property Name="ValueTolerance" Type="decimal" Precision="10" Scale="4" />
+          <Property Name="ValueNumeric" Type="decimal" Precision="15" Scale="6" />
+          <Property Name="ValueString" Type="nvarchar" MaxLength="500" />
+          <Property Name="ValueUnit" Type="nvarchar" MaxLength="30" />
+        </EntityType>
+        <EntityType Name="Favorite">
+          <Key>
+            <PropertyRef Name="FavoriteID" />
+          </Key>
+          <Property Name="FavoriteID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="FavoriteUserID" Type="int" Nullable="false" />
+          <Property Name="FavoriteProductSizeID" Type="int" Nullable="false" />
+          <Property Name="FavoriteCreate" Type="datetime2" Precision="7" />
+          <Property Name="FavoriteFolderName" Type="nvarchar" MaxLength="100" />
+        </EntityType>
+        <EntityType Name="Material">
+          <Key>
+            <PropertyRef Name="MaterialID" />
+          </Key>
+          <Property Name="MaterialID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="MaterialName" Type="nvarchar" MaxLength="100" Nullable="false" />
+          <Property Name="MaterialDescription" Type="nvarchar" MaxLength="250" />
+        </EntityType>
+        <EntityType Name="Product">
+          <Key>
+            <PropertyRef Name="ProductID" />
+          </Key>
+          <Property Name="ProductID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ProductCategoryID" Type="int" Nullable="false" />
+          <Property Name="ProductName" Type="nvarchar" MaxLength="200" Nullable="false" />
+          <Property Name="ProductStandartName" Type="nvarchar(max)" Nullable="false" />
+          <Property Name="ProductStandartNumber" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="ProductDescription" Type="nvarchar" MaxLength="250" />
+          <Property Name="ProductIsActive" Type="bit" />
+        </EntityType>
+        <EntityType Name="Role">
+          <Key>
+            <PropertyRef Name="RoleID" />
+          </Key>
+          <Property Name="RoleID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="RoleName" Type="nvarchar" MaxLength="50" Nullable="false" />
+        </EntityType>
+        <EntityType Name="Size">
+          <Key>
+            <PropertyRef Name="SizeID" />
+          </Key>
+          <Property Name="SizeID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="SizeProductID" Type="int" Nullable="false" />
+          <Property Name="SizeName" Type="nvarchar" MaxLength="100" Nullable="false" />
+          <Property Name="SizeNominalValue" Type="decimal" Precision="15" Scale="6" Nullable="false" />
+          <Property Name="SizeUnit" Type="nvarchar" MaxLength="30" Nullable="false" />
+          <Property Name="SizeSortOrder" Type="int" />
+        </EntityType>
+        <EntityType Name="User">
+          <Key>
+            <PropertyRef Name="UserID" />
+          </Key>
+          <Property Name="UserID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="UserRoleID" Type="int" Nullable="false" />
+          <Property Name="UserLastName" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="UserFirstName" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="UserPatronymic" Type="nvarchar" MaxLength="50" />
+          <Property Name="UserLogin" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="UserPassword" Type="nvarchar" MaxLength="50" Nullable="false" />
+          <Property Name="UserDateBirth" Type="date" />
+          <Property Name="UserPhone" Type="nvarchar" MaxLength="20" />
+          <Property Name="UserEmail" Type="nvarchar" MaxLength="100" />
+          <Property Name="UserIsBlocked" Type="bit" />
+        </EntityType>
+        <EntityType Name="VisitHistory">
+          <Key>
+            <PropertyRef Name="VisitID" />
+          </Key>
+          <Property Name="VisitID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="VisitUserID" Type="int" Nullable="false" />
+          <Property Name="VisitProductID" Type="int" />
+          <Property Name="VisitSearchQuery" Type="nvarchar(max)" />
+          <Property Name="VisitCreate" Type="datetime2" Precision="7" />
+        </EntityType>
+        <Association Name="FK_Category_Category">
+          <End Role="Category" Type="Self.Category" Multiplicity="0..1" />
+          <End Role="Category1" Type="Self.Category" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Category">
+              <PropertyRef Name="CategoryID" />
+            </Principal>
+            <Dependent Role="Category1">
+              <PropertyRef Name="CategoryParentID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Category_Material">
+          <End Role="Material" Type="Self.Material" Multiplicity="1" />
+          <End Role="Category" Type="Self.Category" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Material">
+              <PropertyRef Name="MaterialID" />
+            </Principal>
+            <Dependent Role="Category">
+              <PropertyRef Name="CategoryMaterialID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_CharacteristicValue_Characteristic">
+          <End Role="Characteristic" Type="Self.Characteristic" Multiplicity="1" />
+          <End Role="CharacteristicValue" Type="Self.CharacteristicValue" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Characteristic">
+              <PropertyRef Name="CharactID" />
+            </Principal>
+            <Dependent Role="CharacteristicValue">
+              <PropertyRef Name="ValueCharactID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_CharacteristicValue_Size">
+          <End Role="Size" Type="Self.Size" Multiplicity="1" />
+          <End Role="CharacteristicValue" Type="Self.CharacteristicValue" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Size">
+              <PropertyRef Name="SizeID" />
+            </Principal>
+            <Dependent Role="CharacteristicValue">
+              <PropertyRef Name="ValueSizeID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Favorite_Size">
+          <End Role="Size" Type="Self.Size" Multiplicity="1" />
+          <End Role="Favorite" Type="Self.Favorite" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Size">
+              <PropertyRef Name="SizeID" />
+            </Principal>
+            <Dependent Role="Favorite">
+              <PropertyRef Name="FavoriteProductSizeID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Favorite_User">
+          <End Role="User" Type="Self.User" Multiplicity="1" />
+          <End Role="Favorite" Type="Self.Favorite" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserID" />
+            </Principal>
+            <Dependent Role="Favorite">
+              <PropertyRef Name="FavoriteUserID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Product_Category">
+          <End Role="Category" Type="Self.Category" Multiplicity="1" />
+          <End Role="Product" Type="Self.Product" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Category">
+              <PropertyRef Name="CategoryID" />
+            </Principal>
+            <Dependent Role="Product">
+              <PropertyRef Name="ProductCategoryID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Size_Product">
+          <End Role="Product" Type="Self.Product" Multiplicity="1" />
+          <End Role="Size" Type="Self.Size" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Product">
+              <PropertyRef Name="ProductID" />
+            </Principal>
+            <Dependent Role="Size">
+              <PropertyRef Name="SizeProductID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_User_Role">
+          <End Role="Role" Type="Self.Role" Multiplicity="1" />
+          <End Role="User" Type="Self.User" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Role">
+              <PropertyRef Name="RoleID" />
+            </Principal>
+            <Dependent Role="User">
+              <PropertyRef Name="UserRoleID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_VisitHistory_Product">
+          <End Role="Product" Type="Self.Product" Multiplicity="0..1" />
+          <End Role="VisitHistory" Type="Self.VisitHistory" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Product">
+              <PropertyRef Name="ProductID" />
+            </Principal>
+            <Dependent Role="VisitHistory">
+              <PropertyRef Name="VisitProductID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_VisitHistory_User">
+          <End Role="User" Type="Self.User" Multiplicity="1" />
+          <End Role="VisitHistory" Type="Self.VisitHistory" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserID" />
+            </Principal>
+            <Dependent Role="VisitHistory">
+              <PropertyRef Name="VisitUserID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityContainer Name="Хранилище DiplomMurModelContainer">
+          <EntitySet Name="Category" EntityType="Self.Category" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Characteristic" EntityType="Self.Characteristic" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="CharacteristicValue" EntityType="Self.CharacteristicValue" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Favorite" EntityType="Self.Favorite" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Material" EntityType="Self.Material" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Product" EntityType="Self.Product" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Role" EntityType="Self.Role" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="Size" EntityType="Self.Size" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="User" EntityType="Self.User" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="VisitHistory" EntityType="Self.VisitHistory" Schema="dbo" store:Type="Tables" />
+          <AssociationSet Name="FK_Category_Category" Association="Self.FK_Category_Category">
+            <End Role="Category" EntitySet="Category" />
+            <End Role="Category1" EntitySet="Category" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Category_Material" Association="Self.FK_Category_Material">
+            <End Role="Material" EntitySet="Material" />
+            <End Role="Category" EntitySet="Category" />
+          </AssociationSet>
+          <AssociationSet Name="FK_CharacteristicValue_Characteristic" Association="Self.FK_CharacteristicValue_Characteristic">
+            <End Role="Characteristic" EntitySet="Characteristic" />
+            <End Role="CharacteristicValue" EntitySet="CharacteristicValue" />
+          </AssociationSet>
+          <AssociationSet Name="FK_CharacteristicValue_Size" Association="Self.FK_CharacteristicValue_Size">
+            <End Role="Size" EntitySet="Size" />
+            <End Role="CharacteristicValue" EntitySet="CharacteristicValue" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Favorite_Size" Association="Self.FK_Favorite_Size">
+            <End Role="Size" EntitySet="Size" />
+            <End Role="Favorite" EntitySet="Favorite" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Favorite_User" Association="Self.FK_Favorite_User">
+            <End Role="User" EntitySet="User" />
+            <End Role="Favorite" EntitySet="Favorite" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Product_Category" Association="Self.FK_Product_Category">
+            <End Role="Category" EntitySet="Category" />
+            <End Role="Product" EntitySet="Product" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Size_Product" Association="Self.FK_Size_Product">
+            <End Role="Product" EntitySet="Product" />
+            <End Role="Size" EntitySet="Size" />
+          </AssociationSet>
+          <AssociationSet Name="FK_User_Role" Association="Self.FK_User_Role">
+            <End Role="Role" EntitySet="Role" />
+            <End Role="User" EntitySet="User" />
+          </AssociationSet>
+          <AssociationSet Name="FK_VisitHistory_Product" Association="Self.FK_VisitHistory_Product">
+            <End Role="Product" EntitySet="Product" />
+            <End Role="VisitHistory" EntitySet="VisitHistory" />
+          </AssociationSet>
+          <AssociationSet Name="FK_VisitHistory_User" Association="Self.FK_VisitHistory_User">
+            <End Role="User" EntitySet="User" />
+            <End Role="VisitHistory" EntitySet="VisitHistory" />
+          </AssociationSet>
+        </EntityContainer>
+      </Schema></edmx:StorageModels>
+    <!-- CSDL content -->
+    <edmx:ConceptualModels>
+      <Schema Namespace="DiplomMurModel" Alias="Self" annotation:UseStrongSpatialTypes="false" xmlns:annotation="http://schemas.microsoft.com/ado/2009/02/edm/annotation" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm">
+        <EntityType Name="Category">
+          <Key>
+            <PropertyRef Name="CategoryID" />
+          </Key>
+          <Property Name="CategoryID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="CategoryMaterialID" Type="Int32" Nullable="false" />
+          <Property Name="CategoryName" Type="String" MaxLength="100" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="CategoryParentID" Type="Int32" />
+          <Property Name="CategoryDescription" Type="String" MaxLength="250" FixedLength="false" Unicode="true" />
+          <Property Name="CategorySortOrder" Type="Int32" />
+          <NavigationProperty Name="Category1" Relationship="Self.FK_Category_Category" FromRole="Category" ToRole="Category1" />
+          <NavigationProperty Name="Category2" Relationship="Self.FK_Category_Category" FromRole="Category1" ToRole="Category" />
+          <NavigationProperty Name="Material" Relationship="Self.FK_Category_Material" FromRole="Category" ToRole="Material" />
+          <NavigationProperty Name="Product" Relationship="Self.FK_Product_Category" FromRole="Category" ToRole="Product" />
+        </EntityType>
+        <EntityType Name="Characteristic">
+          <Key>
+            <PropertyRef Name="CharactID" />
+          </Key>
+          <Property Name="CharactID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="CharactName" Type="String" MaxLength="100" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="CharactDataType" Type="String" MaxLength="20" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="CharactDefaultUnit" Type="String" MaxLength="20" FixedLength="false" Unicode="true" />
+          <Property Name="CharactDescription" Type="String" MaxLength="250" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="CharacteristicValue" Relationship="Self.FK_CharacteristicValue_Characteristic" FromRole="Characteristic" ToRole="CharacteristicValue" />
+        </EntityType>
+        <EntityType Name="CharacteristicValue">
+          <Key>
+            <PropertyRef Name="ValueID" />
+          </Key>
+          <Property Name="ValueID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ValueSizeID" Type="Int32" Nullable="false" />
+          <Property Name="ValueCharactID" Type="Int32" Nullable="false" />
+          <Property Name="ValuePrecisionType" Type="String" MaxLength="30" FixedLength="false" Unicode="true" />
+          <Property Name="ValueToleranceDirection" Type="String" MaxLength="5" FixedLength="false" Unicode="true" />
+          <Property Name="ValueTolerance" Type="Decimal" Precision="10" Scale="4" />
+          <Property Name="ValueNumeric" Type="Decimal" Precision="15" Scale="6" />
+          <Property Name="ValueString" Type="String" MaxLength="500" FixedLength="false" Unicode="true" />
+          <Property Name="ValueUnit" Type="String" MaxLength="30" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="Characteristic" Relationship="Self.FK_CharacteristicValue_Characteristic" FromRole="CharacteristicValue" ToRole="Characteristic" />
+          <NavigationProperty Name="Size" Relationship="Self.FK_CharacteristicValue_Size" FromRole="CharacteristicValue" ToRole="Size" />
+        </EntityType>
+        <EntityType Name="Favorite">
+          <Key>
+            <PropertyRef Name="FavoriteID" />
+          </Key>
+          <Property Name="FavoriteID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="FavoriteUserID" Type="Int32" Nullable="false" />
+          <Property Name="FavoriteProductSizeID" Type="Int32" Nullable="false" />
+          <Property Name="FavoriteCreate" Type="DateTime" Precision="7" />
+          <Property Name="FavoriteFolderName" Type="String" MaxLength="100" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="Size" Relationship="Self.FK_Favorite_Size" FromRole="Favorite" ToRole="Size" />
+          <NavigationProperty Name="User" Relationship="Self.FK_Favorite_User" FromRole="Favorite" ToRole="User" />
+        </EntityType>
+        <EntityType Name="Material">
+          <Key>
+            <PropertyRef Name="MaterialID" />
+          </Key>
+          <Property Name="MaterialID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="MaterialName" Type="String" MaxLength="100" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="MaterialDescription" Type="String" MaxLength="250" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="Category" Relationship="Self.FK_Category_Material" FromRole="Material" ToRole="Category" />
+        </EntityType>
+        <EntityType Name="Product">
+          <Key>
+            <PropertyRef Name="ProductID" />
+          </Key>
+          <Property Name="ProductID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ProductCategoryID" Type="Int32" Nullable="false" />
+          <Property Name="ProductName" Type="String" MaxLength="200" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="ProductStandartName" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="ProductStandartNumber" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="ProductDescription" Type="String" MaxLength="250" FixedLength="false" Unicode="true" />
+          <Property Name="ProductIsActive" Type="Boolean" />
+          <NavigationProperty Name="Category" Relationship="Self.FK_Product_Category" FromRole="Product" ToRole="Category" />
+          <NavigationProperty Name="Size" Relationship="Self.FK_Size_Product" FromRole="Product" ToRole="Size" />
+          <NavigationProperty Name="VisitHistory" Relationship="Self.FK_VisitHistory_Product" FromRole="Product" ToRole="VisitHistory" />
+        </EntityType>
+        <EntityType Name="Role">
+          <Key>
+            <PropertyRef Name="RoleID" />
+          </Key>
+          <Property Name="RoleID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="RoleName" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <NavigationProperty Name="User" Relationship="Self.FK_User_Role" FromRole="Role" ToRole="User" />
+        </EntityType>
+        <EntityType Name="Size">
+          <Key>
+            <PropertyRef Name="SizeID" />
+          </Key>
+          <Property Name="SizeID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="SizeProductID" Type="Int32" Nullable="false" />
+          <Property Name="SizeName" Type="String" MaxLength="100" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="SizeNominalValue" Type="Decimal" Precision="15" Scale="6" Nullable="false" />
+          <Property Name="SizeUnit" Type="String" MaxLength="30" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="SizeSortOrder" Type="Int32" />
+          <NavigationProperty Name="CharacteristicValue" Relationship="Self.FK_CharacteristicValue_Size" FromRole="Size" ToRole="CharacteristicValue" />
+          <NavigationProperty Name="Favorite" Relationship="Self.FK_Favorite_Size" FromRole="Size" ToRole="Favorite" />
+          <NavigationProperty Name="Product" Relationship="Self.FK_Size_Product" FromRole="Size" ToRole="Product" />
+        </EntityType>
+        <EntityType Name="User">
+          <Key>
+            <PropertyRef Name="UserID" />
+          </Key>
+          <Property Name="UserID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="UserRoleID" Type="Int32" Nullable="false" />
+          <Property Name="UserLastName" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="UserFirstName" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="UserPatronymic" Type="String" MaxLength="50" FixedLength="false" Unicode="true" />
+          <Property Name="UserLogin" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="UserPassword" Type="String" MaxLength="50" FixedLength="false" Unicode="true" Nullable="false" />
+          <Property Name="UserDateBirth" Type="DateTime" Precision="0" />
+          <Property Name="UserPhone" Type="String" MaxLength="20" FixedLength="false" Unicode="true" />
+          <Property Name="UserEmail" Type="String" MaxLength="100" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="Favorite" Relationship="Self.FK_Favorite_User" FromRole="User" ToRole="Favorite" />
+          <NavigationProperty Name="Role" Relationship="Self.FK_User_Role" FromRole="User" ToRole="Role" />
+          <NavigationProperty Name="VisitHistory" Relationship="Self.FK_VisitHistory_User" FromRole="User" ToRole="VisitHistory" />
+          <Property Name="UserIsBlocked" Type="Boolean" />
+        </EntityType>
+        <EntityType Name="VisitHistory">
+          <Key>
+            <PropertyRef Name="VisitID" />
+          </Key>
+          <Property Name="VisitID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="VisitUserID" Type="Int32" Nullable="false" />
+          <Property Name="VisitProductID" Type="Int32" />
+          <Property Name="VisitSearchQuery" Type="String" MaxLength="Max" FixedLength="false" Unicode="true" />
+          <Property Name="VisitCreate" Type="DateTime" Precision="7" />
+          <NavigationProperty Name="Product" Relationship="Self.FK_VisitHistory_Product" FromRole="VisitHistory" ToRole="Product" />
+          <NavigationProperty Name="User" Relationship="Self.FK_VisitHistory_User" FromRole="VisitHistory" ToRole="User" />
+        </EntityType>
+        <Association Name="FK_Category_Category">
+          <End Role="Category" Type="Self.Category" Multiplicity="0..1" />
+          <End Role="Category1" Type="Self.Category" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Category">
+              <PropertyRef Name="CategoryID" />
+            </Principal>
+            <Dependent Role="Category1">
+              <PropertyRef Name="CategoryParentID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Category_Material">
+          <End Role="Material" Type="Self.Material" Multiplicity="1" />
+          <End Role="Category" Type="Self.Category" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Material">
+              <PropertyRef Name="MaterialID" />
+            </Principal>
+            <Dependent Role="Category">
+              <PropertyRef Name="CategoryMaterialID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Product_Category">
+          <End Role="Category" Type="Self.Category" Multiplicity="1" />
+          <End Role="Product" Type="Self.Product" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Category">
+              <PropertyRef Name="CategoryID" />
+            </Principal>
+            <Dependent Role="Product">
+              <PropertyRef Name="ProductCategoryID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_CharacteristicValue_Characteristic">
+          <End Role="Characteristic" Type="Self.Characteristic" Multiplicity="1" />
+          <End Role="CharacteristicValue" Type="Self.CharacteristicValue" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Characteristic">
+              <PropertyRef Name="CharactID" />
+            </Principal>
+            <Dependent Role="CharacteristicValue">
+              <PropertyRef Name="ValueCharactID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_CharacteristicValue_Size">
+          <End Role="Size" Type="Self.Size" Multiplicity="1" />
+          <End Role="CharacteristicValue" Type="Self.CharacteristicValue" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Size">
+              <PropertyRef Name="SizeID" />
+            </Principal>
+            <Dependent Role="CharacteristicValue">
+              <PropertyRef Name="ValueSizeID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Favorite_Size">
+          <End Role="Size" Type="Self.Size" Multiplicity="1" />
+          <End Role="Favorite" Type="Self.Favorite" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Size">
+              <PropertyRef Name="SizeID" />
+            </Principal>
+            <Dependent Role="Favorite">
+              <PropertyRef Name="FavoriteProductSizeID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Favorite_User">
+          <End Role="User" Type="Self.User" Multiplicity="1" />
+          <End Role="Favorite" Type="Self.Favorite" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserID" />
+            </Principal>
+            <Dependent Role="Favorite">
+              <PropertyRef Name="FavoriteUserID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_Size_Product">
+          <End Role="Product" Type="Self.Product" Multiplicity="1" />
+          <End Role="Size" Type="Self.Size" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Product">
+              <PropertyRef Name="ProductID" />
+            </Principal>
+            <Dependent Role="Size">
+              <PropertyRef Name="SizeProductID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_VisitHistory_Product">
+          <End Role="Product" Type="Self.Product" Multiplicity="0..1" />
+          <End Role="VisitHistory" Type="Self.VisitHistory" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Product">
+              <PropertyRef Name="ProductID" />
+            </Principal>
+            <Dependent Role="VisitHistory">
+              <PropertyRef Name="VisitProductID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_User_Role">
+          <End Role="Role" Type="Self.Role" Multiplicity="1" />
+          <End Role="User" Type="Self.User" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="Role">
+              <PropertyRef Name="RoleID" />
+            </Principal>
+            <Dependent Role="User">
+              <PropertyRef Name="UserRoleID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_VisitHistory_User">
+          <End Role="User" Type="Self.User" Multiplicity="1" />
+          <End Role="VisitHistory" Type="Self.VisitHistory" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="User">
+              <PropertyRef Name="UserID" />
+            </Principal>
+            <Dependent Role="VisitHistory">
+              <PropertyRef Name="VisitUserID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityContainer Name="DiplomMurEntities" annotation:LazyLoadingEnabled="true">
+          <EntitySet Name="Category" EntityType="Self.Category" />
+          <EntitySet Name="Characteristic" EntityType="Self.Characteristic" />
+          <EntitySet Name="CharacteristicValue" EntityType="Self.CharacteristicValue" />
+          <EntitySet Name="Favorite" EntityType="Self.Favorite" />
+          <EntitySet Name="Material" EntityType="Self.Material" />
+          <EntitySet Name="Product" EntityType="Self.Product" />
+          <EntitySet Name="Role" EntityType="Self.Role" />
+          <EntitySet Name="Size" EntityType="Self.Size" />
+          <EntitySet Name="User" EntityType="Self.User" />
+          <EntitySet Name="VisitHistory" EntityType="Self.VisitHistory" />
+          <AssociationSet Name="FK_Category_Category" Association="Self.FK_Category_Category">
+            <End Role="Category" EntitySet="Category" />
+            <End Role="Category1" EntitySet="Category" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Category_Material" Association="Self.FK_Category_Material">
+            <End Role="Material" EntitySet="Material" />
+            <End Role="Category" EntitySet="Category" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Product_Category" Association="Self.FK_Product_Category">
+            <End Role="Category" EntitySet="Category" />
+            <End Role="Product" EntitySet="Product" />
+          </AssociationSet>
+          <AssociationSet Name="FK_CharacteristicValue_Characteristic" Association="Self.FK_CharacteristicValue_Characteristic">
+            <End Role="Characteristic" EntitySet="Characteristic" />
+            <End Role="CharacteristicValue" EntitySet="CharacteristicValue" />
+          </AssociationSet>
+          <AssociationSet Name="FK_CharacteristicValue_Size" Association="Self.FK_CharacteristicValue_Size">
+            <End Role="Size" EntitySet="Size" />
+            <End Role="CharacteristicValue" EntitySet="CharacteristicValue" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Favorite_Size" Association="Self.FK_Favorite_Size">
+            <End Role="Size" EntitySet="Size" />
+            <End Role="Favorite" EntitySet="Favorite" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Favorite_User" Association="Self.FK_Favorite_User">
+            <End Role="User" EntitySet="User" />
+            <End Role="Favorite" EntitySet="Favorite" />
+          </AssociationSet>
+          <AssociationSet Name="FK_Size_Product" Association="Self.FK_Size_Product">
+            <End Role="Product" EntitySet="Product" />
+            <End Role="Size" EntitySet="Size" />
+          </AssociationSet>
+          <AssociationSet Name="FK_VisitHistory_Product" Association="Self.FK_VisitHistory_Product">
+            <End Role="Product" EntitySet="Product" />
+            <End Role="VisitHistory" EntitySet="VisitHistory" />
+          </AssociationSet>
+          <AssociationSet Name="FK_User_Role" Association="Self.FK_User_Role">
+            <End Role="Role" EntitySet="Role" />
+            <End Role="User" EntitySet="User" />
+          </AssociationSet>
+          <AssociationSet Name="FK_VisitHistory_User" Association="Self.FK_VisitHistory_User">
+            <End Role="User" EntitySet="User" />
+            <End Role="VisitHistory" EntitySet="VisitHistory" />
+          </AssociationSet>
+        </EntityContainer>
+      </Schema>
+    </edmx:ConceptualModels>
+    <!-- C-S mapping content -->
+    <edmx:Mappings>
+      <Mapping Space="C-S" xmlns="http://schemas.microsoft.com/ado/2009/11/mapping/cs">
+        <EntityContainerMapping StorageEntityContainer="Хранилище DiplomMurModelContainer" CdmEntityContainer="DiplomMurEntities">
+          <EntitySetMapping Name="Category">
+            <EntityTypeMapping TypeName="DiplomMurModel.Category">
+              <MappingFragment StoreEntitySet="Category">
+                <ScalarProperty Name="CategoryID" ColumnName="CategoryID" />
+                <ScalarProperty Name="CategoryMaterialID" ColumnName="CategoryMaterialID" />
+                <ScalarProperty Name="CategoryName" ColumnName="CategoryName" />
+                <ScalarProperty Name="CategoryParentID" ColumnName="CategoryParentID" />
+                <ScalarProperty Name="CategoryDescription" ColumnName="CategoryDescription" />
+                <ScalarProperty Name="CategorySortOrder" ColumnName="CategorySortOrder" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Characteristic">
+            <EntityTypeMapping TypeName="DiplomMurModel.Characteristic">
+              <MappingFragment StoreEntitySet="Characteristic">
+                <ScalarProperty Name="CharactID" ColumnName="CharactID" />
+                <ScalarProperty Name="CharactName" ColumnName="CharactName" />
+                <ScalarProperty Name="CharactDataType" ColumnName="CharactDataType" />
+                <ScalarProperty Name="CharactDefaultUnit" ColumnName="CharactDefaultUnit" />
+                <ScalarProperty Name="CharactDescription" ColumnName="CharactDescription" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="CharacteristicValue">
+            <EntityTypeMapping TypeName="DiplomMurModel.CharacteristicValue">
+              <MappingFragment StoreEntitySet="CharacteristicValue">
+                <ScalarProperty Name="ValueID" ColumnName="ValueID" />
+                <ScalarProperty Name="ValueSizeID" ColumnName="ValueSizeID" />
+                <ScalarProperty Name="ValueCharactID" ColumnName="ValueCharactID" />
+                <ScalarProperty Name="ValuePrecisionType" ColumnName="ValuePrecisionType" />
+                <ScalarProperty Name="ValueToleranceDirection" ColumnName="ValueToleranceDirection" />
+                <ScalarProperty Name="ValueTolerance" ColumnName="ValueTolerance" />
+                <ScalarProperty Name="ValueNumeric" ColumnName="ValueNumeric" />
+                <ScalarProperty Name="ValueString" ColumnName="ValueString" />
+                <ScalarProperty Name="ValueUnit" ColumnName="ValueUnit" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Favorite">
+            <EntityTypeMapping TypeName="DiplomMurModel.Favorite">
+              <MappingFragment StoreEntitySet="Favorite">
+                <ScalarProperty Name="FavoriteID" ColumnName="FavoriteID" />
+                <ScalarProperty Name="FavoriteUserID" ColumnName="FavoriteUserID" />
+                <ScalarProperty Name="FavoriteProductSizeID" ColumnName="FavoriteProductSizeID" />
+                <ScalarProperty Name="FavoriteCreate" ColumnName="FavoriteCreate" />
+                <ScalarProperty Name="FavoriteFolderName" ColumnName="FavoriteFolderName" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Material">
+            <EntityTypeMapping TypeName="DiplomMurModel.Material">
+              <MappingFragment StoreEntitySet="Material">
+                <ScalarProperty Name="MaterialID" ColumnName="MaterialID" />
+                <ScalarProperty Name="MaterialName" ColumnName="MaterialName" />
+                <ScalarProperty Name="MaterialDescription" ColumnName="MaterialDescription" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Product">
+            <EntityTypeMapping TypeName="DiplomMurModel.Product">
+              <MappingFragment StoreEntitySet="Product">
+                <ScalarProperty Name="ProductID" ColumnName="ProductID" />
+                <ScalarProperty Name="ProductCategoryID" ColumnName="ProductCategoryID" />
+                <ScalarProperty Name="ProductName" ColumnName="ProductName" />
+                <ScalarProperty Name="ProductStandartName" ColumnName="ProductStandartName" />
+                <ScalarProperty Name="ProductStandartNumber" ColumnName="ProductStandartNumber" />
+                <ScalarProperty Name="ProductDescription" ColumnName="ProductDescription" />
+                <ScalarProperty Name="ProductIsActive" ColumnName="ProductIsActive" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Role">
+            <EntityTypeMapping TypeName="DiplomMurModel.Role">
+              <MappingFragment StoreEntitySet="Role">
+                <ScalarProperty Name="RoleID" ColumnName="RoleID" />
+                <ScalarProperty Name="RoleName" ColumnName="RoleName" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="Size">
+            <EntityTypeMapping TypeName="DiplomMurModel.Size">
+              <MappingFragment StoreEntitySet="Size">
+                <ScalarProperty Name="SizeID" ColumnName="SizeID" />
+                <ScalarProperty Name="SizeProductID" ColumnName="SizeProductID" />
+                <ScalarProperty Name="SizeName" ColumnName="SizeName" />
+                <ScalarProperty Name="SizeNominalValue" ColumnName="SizeNominalValue" />
+                <ScalarProperty Name="SizeUnit" ColumnName="SizeUnit" />
+                <ScalarProperty Name="SizeSortOrder" ColumnName="SizeSortOrder" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="User">
+            <EntityTypeMapping TypeName="DiplomMurModel.User">
+              <MappingFragment StoreEntitySet="User">
+                <ScalarProperty Name="UserIsBlocked" ColumnName="UserIsBlocked" />
+                <ScalarProperty Name="UserID" ColumnName="UserID" />
+                <ScalarProperty Name="UserRoleID" ColumnName="UserRoleID" />
+                <ScalarProperty Name="UserLastName" ColumnName="UserLastName" />
+                <ScalarProperty Name="UserFirstName" ColumnName="UserFirstName" />
+                <ScalarProperty Name="UserPatronymic" ColumnName="UserPatronymic" />
+                <ScalarProperty Name="UserLogin" ColumnName="UserLogin" />
+                <ScalarProperty Name="UserPassword" ColumnName="UserPassword" />
+                <ScalarProperty Name="UserDateBirth" ColumnName="UserDateBirth" />
+                <ScalarProperty Name="UserPhone" ColumnName="UserPhone" />
+                <ScalarProperty Name="UserEmail" ColumnName="UserEmail" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="VisitHistory">
+            <EntityTypeMapping TypeName="DiplomMurModel.VisitHistory">
+              <MappingFragment StoreEntitySet="VisitHistory">
+                <ScalarProperty Name="VisitID" ColumnName="VisitID" />
+                <ScalarProperty Name="VisitUserID" ColumnName="VisitUserID" />
+                <ScalarProperty Name="VisitProductID" ColumnName="VisitProductID" />
+                <ScalarProperty Name="VisitSearchQuery" ColumnName="VisitSearchQuery" />
+                <ScalarProperty Name="VisitCreate" ColumnName="VisitCreate" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+        </EntityContainerMapping>
+      </Mapping>
+    </edmx:Mappings>
+  </edmx:Runtime>
+  <!-- EF Designer content (DO NOT EDIT MANUALLY BELOW HERE) -->
+  <Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
+    <Connection>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="MetadataArtifactProcessing" Value="EmbedInOutputAssembly" />
+      </DesignerInfoPropertySet>
+    </Connection>
+    <Options>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="ValidateOnBuild" Value="true" />
+        <DesignerProperty Name="EnablePluralization" Value="false" />
+        <DesignerProperty Name="IncludeForeignKeysInModel" Value="true" />
+        <DesignerProperty Name="UseLegacyProvider" Value="false" />
+        <DesignerProperty Name="CodeGenerationStrategy" Value="Нет" />
+      </DesignerInfoPropertySet>
+    </Options>
+    <!-- Diagram content (shape and connector positions) -->
+    <Diagrams></Diagrams>
+  </Designer>
+</edmx:Edmx>
